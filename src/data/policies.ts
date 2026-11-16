@@ -162,7 +162,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
         rawText:
           "신청일 기준 만 19세~34세 이하인 부모와 별도 거주 무주택 청년으로서, 임차보증금 5천만 원 이하 및 월세 70만 원 이하인 주택에 거주하는 자. (단, 월세가 70만 원을 초과하더라도 보증금 월세 환산액(환산율 5.5%)과 월세액을 합산하여 90만 원 이하인 경우 지원 대상에 포함한다.)",
         plainTranslation:
-          "월세가 70만 원을 넘어도(예: 보증금 1,000만 원 / 월세 75만 원), 보증금 환산액(약 4.5만 원) + 월세(75만 원) = 79.5만 원으로 90만 원 이하이므로 신청 가능합니다!",
+          "월세가 70만 원을 넘어도(예: 보증금 1,000만 원 / 월세 75만 원), 보증금 환산액(약 4.5만 원) + 월세(75만 원) = 79.5만 원으로 90만 원 이하이므로 신청할 수 있습니다.",
         isSpecialClause: true,
       },
       {
@@ -179,9 +179,9 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
         page: "18p [별표2] 특례",
         section: "청년 독립가구 단독 산정 특례 (원가구 소득 미반영)",
         rawText:
-          "[별표2 예외조항 제3호] 만 30세 이상이거나, 혼인·미혼모·부이거나, 만 30세 미만 미혼 청년이라도 주민등록상 부모와 1년 이상 별도 거주하며 청년 본인의 소득이 기준중위소득 50% 이상(2026년 1인가구 기준 월 119만 6천 원 이상 ~ 60% 이하)인 경우 생계를 달리하는 것으로 보아 원가구(부모) 소득·재산 산정을 제외한다.",
+          "[별표2 예외조항 제3호] 만 30세 이상이거나, 혼인·미혼모·부이거나, 만 30세 미만 미혼 청년이라도 주민등록상 부모와 1년 이상 별도 거주하며 청년 본인의 소득이 기준중위소득 50% 이상(2026년 1인가구 기준 월 128만 2천 원 이상 ~ 60% 이하)인 경우 생계를 달리하는 것으로 보아 원가구(부모) 소득·재산 산정을 제외한다.",
         plainTranslation:
-          "부모님 소득이 높아도 포기하지 마세요! ① 만 30세 이상이거나 ② 1년 이상 따로 살면서 알바·근로 월 소득이 약 120만~143만 원 구간이면 부모님 소득·재산을 전혀 보지 않고 100% 본인 기준으로만 통과됩니다.",
+          "부모님 소득이 높아도 대상이 될 수 있습니다. ① 만 30세 이상이거나 ② 1년 이상 따로 살면서 월 소득이 약 128만~154만 원 구간이면 부모님 소득·재산을 보지 않고 본인 기준으로만 심사합니다.",
         isSpecialClause: true,
       },
       {
@@ -191,7 +191,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
         rawText:
           "① 주민등록등본은 최근 5년 주소변동 이력 및 전입일·세대주 관계가 반드시 표시되어야 함(미표시 시 보완 처분). ② 임대차계약서는 확정일자 날인본이어야 하며 등본상 주소지(동·호수)와 일치해야 함. ③ 가족관계증명서는 신청인 기준 '상세' 증명서만 인정함('일반' 불인정).",
         plainTranslation:
-          "서류 낼 때 가장 많이 빠꾸 먹는 3대 지뢰: ① 등본에 '전입일/과거주소' 체크 누락, ② 계약서 '확정일자 도장' 누락 또는 호수 오기재, ③ 가족관계증명서 '일반'으로 잘못 발급.",
+          "서류에서 자주 보완 처분되는 3가지: ① 등본에 '전입일/과거주소' 체크 누락, ② 계약서 '확정일자 도장' 누락 또는 호수 오기재, ③ 가족관계증명서 '일반'으로 잘못 발급.",
       },
     ],
     personas: [
@@ -267,7 +267,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
       {
         id: "q_rent",
         question: "지금 사시는 집의 보증금과 월세(관리비 제외)는 얼마인가요?",
-        easyHint: "월세가 70만 원을 조금 넘더라도 보증금이 낮으면 특례로 통과됩니다!",
+        easyHint: "월세가 70만 원을 조금 넘더라도 보증금이 낮으면 단서조항으로 대상이 될 수 있습니다.",
         adminTermReplaced: "임차보증금 월세 환산액(환산율 5.5%) 합산 산식",
         options: [
           {
@@ -282,7 +282,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
             label: "월세가 70만 원을 조금 넘지만 보증금이 3,000만 원 이하예요",
             subLabel: "예: 보증금 1,000만 원 / 월세 75만 원 (환산 합산 79.5만 원 ≤ 90만 원)",
             ruleImpact: "special_pass",
-            ruleNote: "3p 단서조항(환산율 5.5% 합산 90만 원 이하) 특례 통과!",
+            ruleNote: "3p 단서조항(환산율 5.5% 합산 90만 원 이하) 특례 충족",
           },
         ],
       },
@@ -294,15 +294,15 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
         options: [
           {
             value: "self_120_to_143",
-            label: "월 120만 원 ~ 143만 원 사이예요 (알바·단기근로 등)",
-            subLabel: "중위소득 50% 이상 ~ 60% 이하 구간 (독립가구 특례 핵심 요건!)",
+            label: "월 128만 원 ~ 154만 원 사이예요 (알바·단기근로 등)",
+            subLabel: "중위소득 50% 이상 ~ 60% 이하 구간 (독립가구 특례 요건)",
             ruleImpact: "special_pass",
-            ruleNote: "본인 생계유지 인정 구간 → 부모님 소득 산정 제외 가능!",
+            ruleNote: "본인 생계유지 인정 구간 → 부모님 소득 산정 제외 가능",
           },
           {
             value: "self_under_120",
-            label: "현재 소득이 없거나 월 120만 원 미만이에요",
-            subLabel: "청년 본인가구 중위소득 60% 이하 무조건 충족",
+            label: "현재 소득이 없거나 월 128만 원 미만이에요",
+            subLabel: "청년 본인가구 중위소득 60% 이하 충족",
             ruleImpact: "pass",
             ruleNote: "청년 본인 소득 요건 통과",
           },
@@ -319,7 +319,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
             label: "부모님 맞벌이 등으로 소득이 꽤 있으신 편이에요 (또는 잘 모름)",
             subLabel: "원가구 100% 초과 우려 시 18p [별표2] 독립가구 특례 자동 대조",
             ruleImpact: "special_pass",
-            ruleNote: "18p [별표2] 제3호 특례 적용으로 원가구 소득 심사 면제!",
+            ruleNote: "18p [별표2] 제3호 특례 적용으로 원가구 소득 심사 제외",
           },
           {
             value: "parent_under_100",
@@ -345,7 +345,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
           {
             label: "과거의 주소변동 사항: [최근 5년 포함] 체크",
             mustCheck: true,
-            reason: "1년 이상 부모님과 별도 거주했음을 증명하는 필수 옵션 (미체크 시 100% 반려)",
+            reason: "1년 이상 부모님과 별도 거주했음을 증명하는 필수 옵션 (미체크 시 보완 처분 대상)",
           },
           {
             label: "세대구성사유 및 전입일/변동일: [포함] 체크",
@@ -388,9 +388,9 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
         timeEstimate: "1분 소요 (무료)",
         checkboxOptions: [
           {
-            label: "증명서 종류: 반드시 [상세 증명서] 선택 ('일반' 절대 불가)",
+            label: "증명서 종류: 반드시 [상세 증명서] 선택 ('일반' 불인정)",
             mustCheck: true,
-            reason: "공고문 23p 규정상 '일반증명서' 제출은 반려 사유 1위",
+            reason: "공고문 23p 규정상 '일반증명서'는 인정되지 않음",
           },
           {
             label: "주민등록번호 뒷자리: [전부 공개] 선택",
@@ -410,7 +410,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
           {
             label: "예금주 성명(신청인 본인) 및 가입일자가 찍힌 화면/확인서 저장",
             mustCheck: true,
-            reason: "종이통장이 없어도 모바일 앱 가입확인서 PDF로 완벽 대체 가능",
+            reason: "종이통장이 없어도 모바일 앱 가입확인서 PDF로 대체 가능",
           },
         ],
       },
@@ -447,7 +447,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
     ],
     auditScenarios: {
       defect: {
-        summaryTitle: "제출 전 반려 위험 4건 감지 — 이대로 제출 시 2주 뒤 보완 처분 대상",
+        summaryTitle: "반려 위험 4건 감지 — 제출 전 보완 필요",
         passProbability: 15,
         documents: [
           {
@@ -463,19 +463,19 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
                 label: "현 주소지",
                 value: "서울특별시 관악구 봉천로 123, 301호 (봉천동)",
                 status: "warning",
-                errorTag: "계약서 호수(302호)와 불일치!",
+                errorTag: "계약서 호수(302호)와 불일치",
               },
               {
                 label: "전입일 / 변동일",
                 value: "[비공개 / 미표시]",
                 status: "error",
-                errorTag: "반려 사유 #1: 전입일 옵션 미체크",
+                errorTag: "전입일 옵션 미체크",
               },
               {
                 label: "과거 주소변동 이력",
                 value: "표시 안 함 (현재 주소만 출력됨)",
                 status: "error",
-                errorTag: "반려 사유 #1: 최근 5년 주소변동 누락",
+                errorTag: "최근 5년 주소변동 누락",
               },
             ],
             stampText: "관악구청장 직인 (정상)",
@@ -494,7 +494,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
                 label: "임차 목적물 소재지",
                 value: "서울특별시 관악구 봉천로 123, 302호",
                 status: "error",
-                errorTag: "반려 사유 #2: 등본(301호)과 호수 상이",
+                errorTag: "등본(301호)과 호수 상이",
               },
               {
                 label: "보증금 / 차임(월세)",
@@ -505,7 +505,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
                 label: "확정일자 날인 여부",
                 value: "[직인 및 확정일자 번호 미식별]",
                 status: "error",
-                errorTag: "반려 사유 #3: 확정일자 도장 누락",
+                errorTag: "확정일자 도장 누락",
               },
             ],
             stampText: "확정일자 날인 없음",
@@ -524,7 +524,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
                 label: "증명서 구분",
                 value: "일반증명서 (상세 아님)",
                 status: "error",
-                errorTag: "반려 사유 #4: '상세' 증명서 필수",
+                errorTag: "'상세' 증명서 필수",
               },
               { label: "주민번호 공개여부", value: "전부 공개", status: "ok" },
             ],
@@ -554,7 +554,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
             severity: "critical",
             title: "[교차 불일치] 등본상 호수(301호)와 계약서상 호수(302호) 불일치",
             detail:
-              "주민등록등본에는 '봉천로 123, 301호'로 전입되어 있으나, 임대차계약서에는 '302호'로 기재되어 있습니다. 실제 문패 호수와 건축물대장 호수가 다른 경우 그대로 제출하면 100% 반려됩니다.",
+              "주민등록등본에는 '봉천로 123, 301호'로 전입되어 있으나, 임대차계약서에는 '302호'로 기재되어 있습니다. 실제 문패 호수와 건축물대장 호수가 다른 경우 그대로 제출하면 보완 처분 대상입니다.",
             ruleReference: "공고문 22p [별표4] 주소지 교차검증 기준",
             fixAction:
               "임대인(집주인)이 서명한 '거주동·호수 확인서(공고문 별지 제6호)' 1장을 추가 첨부하거나 등본 호수를 정정해야 합니다.",
@@ -580,7 +580,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
             severity: "warning",
             title: "[종류 오류] '상세' 증명서가 아닌 '일반' 증명서로 발급됨",
             detail:
-              "상단 표제부가 '가족관계증명서(일반)'으로 확인됩니다. 모든 지자체 심사에서 일반증명서는 반려 후 재제출 대상입니다.",
+              "상단 표제부가 '가족관계증명서(일반)'으로 확인됩니다. 공고문 기준상 일반증명서는 인정되지 않아 재제출 대상입니다.",
             ruleReference: "공고문 23p [별표4] 제3호",
             fixAction: "대법원 전자가족관계등록시스템에서 [상세증명서] 라디오 버튼을 선택해 재발급하세요.",
           },
@@ -591,7 +591,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
             sourceA: "등본: 김청년",
             sourceB: "계약서: 김청년",
             status: "pass",
-            note: "명의 100% 일치",
+            note: "명의 일치",
           },
           {
             checkName: "보증금·월세 환산액 상한선",
@@ -617,7 +617,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
         ],
       },
       fixed: {
-        summaryTitle: "사전 모의심사 전 항목 적격 — 반려 위험 0건, 즉시 제출 가능",
+        summaryTitle: "사전 점검 항목 전부 적격 — 감지된 반려 위험 없음",
         passProbability: 99,
         documents: [
           {
@@ -659,7 +659,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
               { label: "임차인 성명", value: "김청년", status: "ok" },
               {
                 label: "임차 목적물 소재지",
-                value: "서울특별시 관악구 봉천로 123, 301호 (등본과 100% 일치)",
+                value: "서울특별시 관악구 봉천로 123, 301호 (등본과 일치)",
                 status: "ok",
               },
               {
@@ -699,11 +699,11 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
             docTitle: "전체 제출서류 통합 검증",
             type: "cross_check",
             severity: "pass",
-            title: "모든 단일 서류 옵션 및 서류 간 교차 데이터 100% 일치",
+            title: "서류별 발급 옵션과 서류 간 교차 항목 모두 일치",
             detail:
               "등본(전입일 2025.08.20, 봉천로 123 301호) ↔ 임대차계약서(확정일자 완료, 301호, 보증금 1천/월세 75만) ↔ 가족관계증명서(상세) 간 모순이나 누락 옵션이 전혀 없습니다.",
             ruleReference: "공고문 22~24p [별표4] 전 항목 적격",
-            fixAction: "바로 Step 4로 이동하여 자동 기입된 신청서와 규격화된 파일 패키지를 다운로드하세요.",
+            fixAction: "신청 패키지 탭에서 자동 기입된 신청서를 확인하세요.",
           },
         ],
         crossCheckMatrix: [
@@ -712,7 +712,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
             sourceA: "등본: 김청년",
             sourceB: "계약서: 김청년",
             status: "pass",
-            note: "명의 100% 일치",
+            note: "명의 일치",
           },
           {
             checkName: "보증금·월세 환산액 상한선",
@@ -726,7 +726,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
             sourceA: "봉천로 123, 301호",
             sourceB: "봉천로 123, 301호",
             status: "pass",
-            note: "도로명주소 및 동·호수 100% 일치",
+            note: "도로명주소 및 동·호수 일치",
           },
           {
             checkName: "임대차계약 법적 효력(확정일자)",
@@ -741,38 +741,33 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
     applicationFormTemplate: {
       formTitle: "[별지 제1호 서식] 2026년 청년월세 한시 특별지원 신청서 및 소득·재산 신고서",
       autoFilledFields: [
-        { label: "신청인 성명 / 생년월일", value: "김청년 (1999. 05. 12.)", sourceDoc: "주민등록등본 OCR 추출" },
+        { label: "신청인 성명 / 생년월일", value: "김청년 (1999. 05. 12.)", sourceDoc: "주민등록등본" },
         {
           label: "현 거주지 도로명주소",
           value: "서울특별시 관악구 봉천로 123, 301호 (전입일: 2025.08.20)",
-          sourceDoc: "등본 ↔ 계약서 교차검증 완료",
+          sourceDoc: "등본 · 계약서 교차 확인",
         },
         {
           label: "임대차 계약 조건",
           value: "보증금 10,000,000원 / 월 차임 750,000원 (환산합산 795,833원)",
-          sourceDoc: "임대차계약서 제2조 추출",
+          sourceDoc: "임대차계약서 제2조",
         },
         {
           label: "임대차 계약 기간 / 확정일자",
           value: "2025. 08. 20. ~ 2027. 08. 19. (확정일자 제2025-004812호)",
-          sourceDoc: "임대차계약서 직인 OCR 추출",
+          sourceDoc: "임대차계약서 확정일자",
         },
         {
           label: "적용 심사 특례 코드",
           value: "[특례 제3호] 청년 독립가구 단독산정 (원가구 소득 미반영) + [단서 제1호] 보증금 월세 환산액 합산 적용",
-          sourceDoc: "공고패스 Rule-Tree 판정 엔진",
+          sourceDoc: "자격 판정 결과",
         },
       ],
       essayTitle: "별도가구 생계유지 소명 및 지원금 활용계획서 (지자체 추가 확인란)",
       essayPrompt:
         "공고문 18p [별표2] 독립가구 특례 적용을 위한 본인 생계유지 현황 및 주거비 절감액의 구직·역량개발 활용 계획",
       forbiddenWords: ["단순 유흥비", "해외여행", "주식 투자", "코인", "부모님 용돈 지원"],
-      recommendedKeywords: [
-        "1년 이상 별도 세대 구성",
-        "근로·사업소득을 통한 독립 생계",
-        "주거비 부담 완화",
-        "직무 역량 강화 및 취업 준비",
-      ],
+      recommendedKeywords: ["별도 세대", "근로소득", "주거비", "역량 강화"],
       generatedEssayDraft:
         "본인은 2025년 8월 20일 현 주소지(서울시 관악구 봉천로 123, 301호)로 전입한 이래 1년 이상 부모와 주민등록상 별도 세대를 구성하여 독립적으로 거주하고 있습니다. 현재 월 평균 약 130만 원의 근로소득(기준중위소득 50% 이상~60% 이하 구간)을 통해 임차료 및 생활비를 본인 소득으로 자립 부담하고 있어 공고문 [별표2] 제3호의 청년 독립가구 단독산정 특례 요건을 충족합니다.\n\n본 청년월세 특별지원을 통해 매월 절감되는 20만 원(연간 240만 원)의 주거비는 현재 준비 중인 IT·데이터 직무 취업 역량 강화(자격증 취득 및 실무 포트폴리오 고도화)와 안정적인 구직 활동 기간 확보에 전액 활용하여 조기 정규직 취업 및 경제적 자립을 달성하겠습니다.",
     },
@@ -797,7 +792,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
         rawText:
           "원칙적으로 I유형(요건심사형)은 가구 기준중위소득 60% 이하 및 최근 2년 이내 100일(800시간) 이상의 취업경험을 요한다. 다만, 만 18세~34세 청년(병역의무 이행 시 최대 만 37세)은 가구 단위 기준중위소득 120% 이하(재산 합계 5억 원 이하)까지 확대 적용하며, 최근 2년 이내 취업경험이 전혀 없더라도(신규 졸업·수료생 포함) 선발한다.",
         plainTranslation:
-          "본문 앞장의 '중위소득 60% 이하 & 취업경험 100일 필수'만 보고 닫지 마세요! 만 18~34세 청년은 11p [별표1] 특례에 따라 ① 가구 중위소득 120% 이하(4인가구 기준 약 월 730만 원 이하!)까지 완화되며 ② 알바/취업 경험이 0일이어도 100% 신청 가능합니다!",
+          "본문 앞장의 '중위소득 60% 이하 & 취업경험 100일 필수'만 보고 닫지 마세요! 만 18~34세 청년은 11p [별표1] 특례에 따라 ① 가구 중위소득 120% 이하(4인가구 기준 약 월 779만 원 이하)까지 완화되며 ② 알바/취업 경험이 0일이어도 100% 신청 가능합니다!",
         isSpecialClause: true,
       },
       {
@@ -877,7 +872,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
         options: [
           {
             value: "under_120",
-            label: "가구 합산 중위소득 120% 이하(4인가구 월 731만 원 이하 / 재산 5억 이하)예요",
+            label: "가구 합산 중위소득 120% 이하(4인가구 월 779만 원 이하 / 재산 5억 이하)예요",
             subLabel: "청년특례 소득·재산 기준 통과",
             ruleImpact: "special_pass",
             ruleNote: "중위소득 120% 청년특례 충족",
@@ -952,7 +947,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
                 label: "등본상 가구원(부·모) 서명",
                 value: "박아버지 서명 완료 / 김어머니 [서명 누락]",
                 status: "error",
-                errorTag: "반려 사유 #1: 가구원 1인 서명 누락",
+                errorTag: "가구원 1인 서명 누락",
               },
             ],
             stampText: "서명 누락 검출",

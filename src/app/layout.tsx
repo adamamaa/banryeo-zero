@@ -2,27 +2,21 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "공고패스 (GongGoPass) | 청년 지원금 사전 모의심사 & 서류 완주 에이전트",
-  description:
-    "2026 대한민국 청년 CAREER FAIR AI 해커톤 - 30페이지 공고문 별표 해독부터 제출 전 AI 공무원 서류 반려 0% 사전 검수까지",
+  title: "공고패스 | 청년 지원금 제출 전 사전 점검",
+  description: "공고문 조건으로 자격을 계산하고, 준비한 서류를 접수 기준에 맞춰 제출 전에 검수합니다.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ko">
       <head>
         <link
           rel="stylesheet"
-          as="style"
           crossOrigin="anonymous"
           href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css"
         />
       </head>
-      <body className="min-h-screen flex flex-col">{children}</body>
+      <body>{children}</body>
     </html>
   );
 }
