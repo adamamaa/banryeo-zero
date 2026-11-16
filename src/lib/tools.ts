@@ -37,7 +37,7 @@ export interface ToolChainParams {
 const won = (n: number) => `${n.toLocaleString("ko-KR")}원`;
 const policy = POLICY_SCENARIOS[0];
 
-async function fetchGov24Services(key: string): Promise<string[]> {
+export async function fetchGov24Services(key: string): Promise<string[]> {
   try {
     const url = new URL("https://api.odcloud.kr/api/gov24/v3/serviceList");
     url.searchParams.set("page", "1");

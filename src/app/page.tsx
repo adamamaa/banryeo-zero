@@ -17,8 +17,8 @@ import {
   Paperclip,
   Plus,
   RefreshCw,
-  Settings,
-  ShieldCheck,
+  Plug,
+  Trash2,
   X,
 } from "lucide-react";
 import { POLICY_SCENARIOS } from "@/data/policies";
@@ -70,6 +70,53 @@ interface Staged {
 }
 
 const REGION = "서울특별시 관악구 봉천로 123, 301호";
+
+interface Site {
+  id: string;
+  name: string;
+  url: string;
+  desc: string;
+  keywords?: string[];
+  custom?: boolean;
+}
+
+interface Chat {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messages: Message[];
+}
+
+// 도구로 모을 수 있는 정부 사이트. 로그인은 각 사이트에서 직접 한다.
+const CATALOG: Site[] = [
+  { id: "gov24", name: "정부24", url: "https://www.gov.kr", desc: "주민등록등본 등 민원서류 발급", keywords: ["등본", "초본", "정부24", "민원", "발급"] },
+  { id: "bokjiro", name: "복지로", url: "https://www.bokjiro.go.kr", desc: "복지 급여 온라인 신청", keywords: ["복지로", "신청", "월세"] },
+  { id: "youth", name: "온통청년", url: "https://www.youthcenter.go.kr", desc: "청년 정책 공고 검색", keywords: ["온통청년", "공고", "정책", "지원금"] },
+  { id: "efamily", name: "전자가족관계등록시스템", url: "https://efamily.scourt.go.kr", desc: "가족관계증명서 발급", keywords: ["가족관계"] },
+  { id: "rtms", name: "부동산거래관리시스템", url: "https://rtms.molit.go.kr", desc: "주택임대차 신고필증 발급", keywords: ["확정일자", "신고필증", "임대차", "계약서"] },
+  { id: "applyhome", name: "청약홈", url: "https://www.applyhome.co.kr", desc: "청약통장 가입 확인", keywords: ["청약"] },
+  { id: "work24", name: "고용24", url: "https://www.work24.go.kr", desc: "국민취업지원제도 신청", keywords: ["취업", "구직", "고용"] },
+  { id: "nhis", name: "국민건강보험", url: "https://www.nhis.or.kr", desc: "건강보험료 납부 확인", keywords: ["건보", "건강보험"] },
+  { id: "hometax", name: "홈택스", url: "https://www.hometax.go.kr", desc: "소득금액증명 발급", keywords: ["홈택스", "소득금액", "소득 증명"] },
+];
+const DEFAULT_TOOLS = ["gov24", "bokjiro", "youth"];
+
+const isHttpUrl = (v: string) => {
+  try {
+    return ["http:", "https:"].includes(new URL(v).protocol);
+  } catch {
+    return false;
+  }
+};
+
+function loadLocal<T>(key: string, fallback: T): T {
+  try {
+    const v = localStorage.getItem(key);
+    return v ? (JSON.parse(v) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "tools", label: "실행 내역" },
@@ -134,7 +181,7 @@ const risksOf = (a: { findings: { severity: string }[] }) =>
 
 export default function Page() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [canvasOpen, setCanvasOpen] = useState(true);
+  const [canvasOpen, setCanvasOpen] = useState(false);
   const [view, setView] = useState<View>("tools");
 
   const [geminiKey, setGeminiKey] = useState("");
@@ -142,7 +189,19 @@ export default function Page() {
   const [apiConnected, setApiConnected] = useState(false);
   const [apiMsg, setApiMsg] = useState("");
   const [testing, setTesting] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showTools, setShowTools] = useState(false);
+  const [publicOk, setPublicOk] = useState(false);
+  const [publicMsg, setPublicMsg] = useState("");
+
+  // 브라우저(localStorage)에만 저장되는 상태
+  const [loaded, setLoaded] = useState(false);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [chatId, setChatId] = useState(() => `c-${Date.now()}`);
+  const [addedIds, setAddedIds] = useState<string[]>(DEFAULT_TOOLS);
+  const [custom, setCustom] = useState<Site[]>([]);
+  const [siteName, setSiteName] = useState("");
+  const [siteUrl, setSiteUrl] = useState("");
+  const [siteError, setSiteError] = useState("");
   const [maskOnScreen, setMaskOnScreen] = useState(true);
 
   const [profile, setProfile] = useState<Profile>({
@@ -171,6 +230,33 @@ export default function Page() {
   const [working, setWorking] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const endRef = useRef<HTMLDivElement>(null);
+
+  const allTools = [...CATALOG, ...custom];
+  const myTools = allTools.filter((t) => addedIds.includes(t.id));
+
+  const newChat = () => {
+    if (working) return;
+    setMessages([]);
+    setChatId(`c-${Date.now()}`);
+  };
+  const openChat = (id: string) => {
+    const c = chats.find((x) => x.id === id);
+    if (!c || working) return;
+    setMessages(c.messages);
+    setChatId(id);
+  };
+  const deleteChat = (id: string) => {
+    setChats((prev) => prev.filter((c) => c.id !== id));
+    if (id === chatId) newChat();
+  };
+
+  // 질문과 관련된 내 도구를 링크로 덧붙인다 (답변에 이미 있는 주소는 제외)
+  const relatedLinks = (question: string, reply: string) => {
+    const hits = myTools.filter(
+      (t) => !reply.includes(t.url) && [t.name, ...(t.keywords || [])].some((k) => question.includes(k))
+    );
+    return hits.length ? `\n\n관련 사이트\n${hits.map((t) => `- ${t.name}: ${t.url}`).join("\n")}` : "";
+  };
 
   const scrollDown = () => setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 60);
 
@@ -243,8 +329,59 @@ export default function Page() {
     setPublicKey(localStorage.getItem("gonggopass_public_key") || "");
     verifyKey(g);
     fetchTools();
+    setChats(loadLocal<Chat[]>("gonggopass_chats", []));
+    const saved = loadLocal<{ added: string[]; custom: Site[] } | null>("gonggopass_tools", null);
+    if (saved) {
+      const safe = (saved.custom || []).filter((c) => isHttpUrl(c.url)).map((c) => ({ ...c, custom: true }));
+      setCustom(safe);
+      setAddedIds(saved.added || DEFAULT_TOOLS);
+    }
+    setLoaded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (loaded) localStorage.setItem("gonggopass_chats", JSON.stringify(chats));
+  }, [chats, loaded]);
+
+  useEffect(() => {
+    if (loaded) localStorage.setItem("gonggopass_tools", JSON.stringify({ added: addedIds, custom }));
+  }, [addedIds, custom, loaded]);
+
+  // 대화가 끝날 때마다 히스토리에 반영 (최근 30개)
+  useEffect(() => {
+    if (!loaded || !messages.length || messages.some((m) => m.pending)) return;
+    setChats((prev) => {
+      if (prev.find((c) => c.id === chatId)?.messages === messages) return prev;
+      const title = messages.find((m) => m.role === "user")?.content.slice(0, 40) || "새 대화";
+      return [{ id: chatId, title, updatedAt: Date.now(), messages }, ...prev.filter((c) => c.id !== chatId)].slice(0, 30);
+    });
+  }, [messages, chatId, loaded]);
+
+  const saveKeys = async () => {
+    if (!geminiKey) localStorage.removeItem("gonggopass_gemini_key");
+    localStorage.setItem("gonggopass_public_key", publicKey);
+    await verifyKey(geminiKey);
+    if (publicKey) {
+      try {
+        const res = await fetch("/api/agent/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "ping_gov24", publicDataApiKey: publicKey }),
+        });
+        const data = await res.json();
+        setPublicOk(Boolean(data.connected));
+        setPublicMsg(data.message || "");
+      } catch {
+        setPublicOk(false);
+        setPublicMsg("서버에 연결하지 못했습니다.");
+      }
+    } else {
+      setPublicOk(false);
+      setPublicMsg("");
+    }
+    fetchTools();
+  };
 
   const patch = (id: string, m: Partial<Message>) =>
     setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, ...m, pending: false } : x)));
@@ -416,6 +553,7 @@ export default function Page() {
           apiKey: geminiKey,
           publicDataApiKey: publicKey,
           userMessage: text,
+          sites: myTools.map(({ name, url }) => ({ name, url })),
           userProfile: {
             age: profile.age,
             income: profile.incomeManwon,
@@ -436,8 +574,9 @@ export default function Page() {
         content:
           data.reply +
           (data.mode === "local_rules" && !geminiKey
-            ? "\n\n자유 질문에 대한 답변은 Gemini API 키를 연결하면 제공됩니다. 지금은 입력된 조건의 계산 결과만 안내합니다."
-            : ""),
+            ? "\n\n지금은 입력된 조건의 계산 결과만 안내합니다. 연결 설정에서 Gemini API 키를 넣으면 질문 내용에 맞춰 답변합니다."
+            : "") +
+          relatedLinks(text, data.reply),
         traces: data.toolExecutions,
         artifact: { view: "triage", title: "자격 판정 결과", meta: "입력 조건 기준 계산" },
         followUps: ["recipe", "audit_defect"],
@@ -497,90 +636,87 @@ export default function Page() {
             </IconButton>
           </div>
 
-          <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-2">
+          <div className="px-3">
+            <button
+              onClick={newChat}
+              className="flex w-full items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-[13px] font-medium text-slate-800 transition-colors hover:bg-slate-100 active:translate-y-px"
+            >
+              <Plus className="h-4 w-4" />새 대화
+            </button>
+          </div>
+
+          <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
             <div>
-              <SideLabel>대상 공고</SideLabel>
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <div className="text-[13px] font-semibold leading-snug">{policy.title}</div>
-                <div className="mt-1 text-xs text-slate-500">{policy.ministry}</div>
-                <div className="mt-2 text-xs text-slate-600">{policy.maxBenefitText}</div>
-              </div>
+              <SideLabel>히스토리</SideLabel>
+              {chats.length === 0 ? (
+                <p className="px-2 text-xs leading-relaxed text-slate-400">대화를 시작하면 여기에 저장됩니다.</p>
+              ) : (
+                <ul className="space-y-0.5">
+                  {chats.map((c) => (
+                    <li key={c.id} className="group relative">
+                      <button
+                        onClick={() => openChat(c.id)}
+                        aria-current={c.id === chatId}
+                        className={`block w-full truncate rounded-md py-1.5 pl-2 pr-8 text-left text-[13px] transition-colors ${
+                          c.id === chatId
+                            ? "bg-slate-200/80 font-medium text-slate-900"
+                            : "text-slate-700 hover:bg-slate-200/60"
+                        }`}
+                      >
+                        {c.title}
+                      </button>
+                      <button
+                        aria-label={`대화 삭제: ${c.title}`}
+                        onClick={() => deleteChat(c.id)}
+                        className="absolute right-1 top-1 hidden h-6 w-6 place-items-center rounded text-slate-400 hover:text-red-600 focus-visible:grid group-hover:grid"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             <div>
-              <SideLabel>시연 시나리오</SideLabel>
+              <SideLabel>내 도구</SideLabel>
               <ul className="space-y-0.5">
-                {(["triage", "recipe", "audit_defect", "audit_fixed"] as MissionKey[]).map((k) => (
-                  <li key={k}>
-                    <button
-                      onClick={() => runMission(k)}
-                      disabled={working}
-                      className="group flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-slate-200/60 disabled:opacity-50"
+                {myTools.map((t) => (
+                  <li key={t.id}>
+                    <a
+                      href={t.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] text-slate-700 transition-colors hover:bg-slate-200/60"
                     >
-                      <span className="tnum mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border border-slate-300 bg-white text-[11px] font-medium text-slate-600">
-                        {MISSIONS[k].no}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-[13px] font-medium text-slate-800">{MISSIONS[k].label}</span>
-                        <span className="block truncate text-xs text-slate-500">{MISSIONS[k].sub}</span>
-                      </span>
-                    </button>
+                      <span className="truncate">{t.name}</span>
+                      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-300 group-hover:text-slate-600" />
+                    </a>
                   </li>
                 ))}
               </ul>
               <button
-                onClick={() => runMission("all")}
-                disabled={working}
-                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-[13px] font-medium text-slate-700 transition-colors hover:bg-slate-100 active:translate-y-px disabled:opacity-50"
+                onClick={() => setShowTools(true)}
+                className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] font-medium text-brand-700 hover:bg-slate-200/60"
               >
-                전체 흐름 실행
-                <ArrowRight className="h-3.5 w-3.5" />
+                <Plus className="h-3.5 w-3.5" />
+                도구 추가 · 관리
               </button>
-            </div>
-
-            <div>
-              <SideLabel>데이터 출처 표시</SideLabel>
-              <ul className="space-y-1.5 px-2">
-                {(Object.keys(SOURCE) as ToolSource[]).map((s) => (
-                  <li key={s} className="flex items-center gap-2 text-xs text-slate-600">
-                    <SourceBadge source={s} />
-                    <span>{SOURCE[s].hint}</span>
-                  </li>
-                ))}
-              </ul>
             </div>
           </nav>
 
-          <div className="space-y-1 border-t border-slate-200 p-3">
+          <div className="border-t border-slate-200 p-3">
             <button
-              role="switch"
-              aria-checked={maskOnScreen}
-              onClick={() => setMaskOnScreen((v) => !v)}
+              onClick={() => setShowTools(true)}
               className="flex w-full items-center justify-between rounded-md px-2 py-2 text-[13px] text-slate-700 hover:bg-slate-200/60"
             >
               <span className="flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-slate-500" />
-                주민번호 화면 마스킹
-              </span>
-              <span
-                className={`relative h-4 w-7 rounded-full transition-colors ${maskOnScreen ? "bg-brand-600" : "bg-slate-300"}`}
-              >
-                <span
-                  className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${maskOnScreen ? "translate-x-3.5" : "translate-x-0.5"}`}
-                />
-              </span>
-            </button>
-            <button
-              onClick={() => setShowSettings(true)}
-              className="flex w-full items-center justify-between rounded-md px-2 py-2 text-[13px] text-slate-700 hover:bg-slate-200/60"
-            >
-              <span className="flex items-center gap-2">
-                <Settings className="h-4 w-4 text-slate-500" />
-                API 설정
+                <Plug className="h-4 w-4 text-slate-500" />
+                연결 설정
               </span>
               <span className="flex items-center gap-1.5 text-xs text-slate-500">
                 <span className={`h-1.5 w-1.5 rounded-full ${apiConnected ? "bg-emerald-500" : "bg-slate-400"}`} />
-                {apiConnected ? "Gemini 연결됨" : "키 없음"}
+                {apiConnected ? "AI 연결됨" : "AI 미연결"}
               </span>
             </button>
           </div>
@@ -602,7 +738,7 @@ export default function Page() {
           <div className="flex items-center gap-1">
             {messages.length > 0 && (
               <button
-                onClick={() => setMessages([])}
+                onClick={newChat}
                 className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] text-slate-600 hover:bg-slate-100"
               >
                 <Plus className="h-4 w-4" />새 대화
@@ -645,9 +781,27 @@ export default function Page() {
                   ))}
                 </div>
 
-                <p className="mt-4 text-xs leading-relaxed text-slate-500">
-                  위 4단계는 시연 시나리오입니다. <SourceBadge source="sample" /> 표시가 붙은 결과는 시연용
-                  데이터이며, 최종 판정은 접수 기관이 합니다.
+                <div className="mt-6">
+                  <div className="text-xs font-medium text-slate-500">이렇게 물어볼 수 있어요</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {[
+                      "월세가 70만 원을 넘어도 받을 수 있나요?",
+                      "주민등록등본은 어디서 어떻게 발급하나요?",
+                      "부모님 소득이 높으면 탈락인가요?",
+                    ].map((q) => (
+                      <button
+                        key={q}
+                        onClick={() => setInput(q)}
+                        className="rounded-full border border-slate-300 px-3 py-1.5 text-[13px] text-slate-700 transition-colors hover:bg-slate-50"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <p className="mt-6 text-xs leading-relaxed text-slate-500">
+                  위 4단계는 시연 시나리오입니다. 최종 판정은 접수 기관이 합니다.
                 </p>
               </div>
             ) : (
@@ -1380,68 +1534,190 @@ export default function Page() {
         </section>
       )}
 
-      {/* ───────── API 설정 ───────── */}
-      {showSettings && (
-        <div
-          className="fixed inset-0 z-40 grid place-items-center bg-slate-900/40 p-4"
-          onClick={() => setShowSettings(false)}
-        >
+      {/* ───────── 도구 · 연결 ───────── */}
+      {showTools && (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-slate-900/40 p-4" onClick={() => setShowTools(false)}>
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="API 설정"
+            aria-label="도구와 연결"
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-xl"
+            className="flex max-h-[88dvh] w-full max-w-lg flex-col rounded-xl border border-slate-200 bg-white shadow-xl"
           >
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5">
-              <h2 className="text-sm font-semibold">API 설정</h2>
-              <IconButton label="닫기" onClick={() => setShowSettings(false)}>
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-3.5">
+              <h2 className="text-sm font-semibold">도구와 연결</h2>
+              <IconButton label="닫기" onClick={() => setShowTools(false)}>
                 <X className="h-4 w-4" />
               </IconButton>
             </div>
-            <div className="space-y-4 p-5">
-              {apiMsg && (
-                <p
-                  className={`rounded-md border px-3 py-2 text-[13px] leading-relaxed ${
-                    apiConnected ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700"
-                  }`}
-                >
-                  {apiMsg}
+
+            <div className="space-y-7 overflow-y-auto p-5">
+              <section>
+                <h3 className="text-[13px] font-semibold">사이트</h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  추가한 사이트는 왼쪽 &lsquo;내 도구&rsquo;에 모이고, 답변에서 관련 링크로 안내됩니다. 로그인은 각
+                  사이트에서 직접 합니다. 이 앱은 인증서나 비밀번호를 받지 않습니다.
                 </p>
-              )}
-              <KeyField
-                label="Gemini API 키"
-                hint="이미지·PDF 서류 판독과 자유 질문 답변에 사용합니다."
-                value={geminiKey}
-                onChange={setGeminiKey}
-                placeholder="AIza..."
-              />
-              <KeyField
-                label="공공데이터포털 키 (선택)"
-                hint="보조금24 지원사업 조회를 실시간 API로 바꿉니다."
-                value={publicKey}
-                onChange={(v) => {
-                  setPublicKey(v);
-                  localStorage.setItem("gonggopass_public_key", v);
-                }}
-                placeholder="data.go.kr 인증키"
-              />
-              <p className="text-xs leading-relaxed text-slate-500">
-                키는 이 브라우저에만 저장되며, 요청할 때 이 앱의 서버를 거쳐 해당 API로 전달됩니다. 이미지·PDF 서류는
-                판독을 위해 원본이 Gemini로 전송됩니다.
-              </p>
-              <button
-                onClick={async () => {
-                  if (!geminiKey) localStorage.removeItem("gonggopass_gemini_key");
-                  await verifyKey(geminiKey);
-                  fetchTools();
-                }}
-                disabled={testing}
-                className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:opacity-60"
-              >
-                {testing && <LoaderCircle className="h-4 w-4 animate-spin" />}
-                저장하고 연결 확인
-              </button>
+                <ul className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
+                  {allTools.map((t) => {
+                    const on = addedIds.includes(t.id);
+                    return (
+                      <li key={t.id} className="flex items-center gap-3 px-3 py-2.5">
+                        <div className="min-w-0 flex-1">
+                          <a
+                            href={t.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-[13px] font-medium hover:text-brand-700"
+                          >
+                            {t.name}
+                            <ExternalLink className="h-3 w-3 text-slate-400" />
+                          </a>
+                          <div className="truncate text-xs text-slate-500">{t.desc}</div>
+                        </div>
+                        {t.custom && (
+                          <button
+                            aria-label={`${t.name} 삭제`}
+                            onClick={() => {
+                              setCustom((c) => c.filter((x) => x.id !== t.id));
+                              setAddedIds((a) => a.filter((x) => x !== t.id));
+                            }}
+                            className="grid h-7 w-7 place-items-center rounded text-slate-400 hover:text-red-600"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setAddedIds((a) => (on ? a.filter((x) => x !== t.id) : [...a, t.id]))}
+                          aria-pressed={on}
+                          className={`flex w-[4.5rem] shrink-0 items-center justify-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
+                            on
+                              ? "border-brand-600 bg-brand-50 text-brand-700"
+                              : "border-slate-300 text-slate-600 hover:bg-slate-50"
+                          }`}
+                        >
+                          {on && <Check className="h-3 w-3" strokeWidth={2.5} />}
+                          {on ? "추가됨" : "추가"}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const name = siteName.trim();
+                    let url = siteUrl.trim();
+                    if (url && !/^https?:\/\//i.test(url)) url = `https://${url}`;
+                    if (!name || !isHttpUrl(url)) {
+                      setSiteError("이름과 올바른 주소(https://...)를 입력하세요.");
+                      return;
+                    }
+                    const id = `custom-${Date.now()}`;
+                    setCustom((c) => [...c, { id, name, url, desc: new URL(url).hostname, custom: true }]);
+                    setAddedIds((a) => [...a, id]);
+                    setSiteName("");
+                    setSiteUrl("");
+                    setSiteError("");
+                  }}
+                  className="mt-3"
+                >
+                  <div className="flex gap-2">
+                    <input
+                      value={siteName}
+                      onChange={(e) => setSiteName(e.target.value)}
+                      aria-label="사이트 이름"
+                      placeholder="사이트 이름"
+                      className="w-28 shrink-0 rounded-md border border-slate-300 px-2.5 py-1.5 text-[13px] focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/15"
+                    />
+                    <input
+                      value={siteUrl}
+                      onChange={(e) => setSiteUrl(e.target.value)}
+                      aria-label="사이트 주소"
+                      placeholder="https://"
+                      className="min-w-0 flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-[13px] focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/15"
+                    />
+                    <button
+                      type="submit"
+                      className="shrink-0 rounded-md border border-slate-300 px-3 py-1.5 text-[13px] font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      직접 추가
+                    </button>
+                  </div>
+                  {siteError && <p className="mt-1.5 text-xs text-red-700">{siteError}</p>}
+                </form>
+              </section>
+
+              <section>
+                <h3 className="text-[13px] font-semibold">API 연결</h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  키로 인증하면 실제 데이터와 AI 답변이 연결됩니다.
+                </p>
+                <div className="mt-3 space-y-4">
+                  <KeyField
+                    label="Google Gemini API 키"
+                    hint={apiMsg || "자유 질문 답변과 이미지·PDF 서류 판독에 사용합니다."}
+                    ok={apiConnected}
+                    value={geminiKey}
+                    onChange={setGeminiKey}
+                    placeholder="AIza..."
+                    link={{ href: "https://aistudio.google.com/app/apikey", text: "키 발급" }}
+                  />
+                  <KeyField
+                    label="공공데이터포털 키 (보조금24)"
+                    hint={publicMsg || "정부 지원사업 목록을 실시간으로 조회합니다."}
+                    ok={publicOk}
+                    value={publicKey}
+                    onChange={setPublicKey}
+                    placeholder="data.go.kr 인증키"
+                    link={{ href: "https://www.data.go.kr", text: "키 발급" }}
+                  />
+                  <button
+                    onClick={saveKeys}
+                    disabled={testing}
+                    className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:opacity-60"
+                  >
+                    {testing && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                    저장하고 연결 확인
+                  </button>
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-[13px] font-semibold">개인정보와 저장</h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  대화 기록, 도구 목록, API 키는 이 브라우저에만 저장됩니다. 이미지·PDF 서류는 판독을 위해 원본이
+                  Gemini로 전송됩니다.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <button
+                    role="switch"
+                    aria-checked={maskOnScreen}
+                    onClick={() => setMaskOnScreen((v) => !v)}
+                    className="flex items-center gap-2.5 text-[13px] text-slate-700"
+                  >
+                    <span className={`relative h-4 w-7 rounded-full transition-colors ${maskOnScreen ? "bg-brand-600" : "bg-slate-300"}`}>
+                      <span
+                        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${maskOnScreen ? "translate-x-3.5" : "translate-x-0.5"}`}
+                      />
+                    </span>
+                    주민번호 화면 마스킹
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm("저장된 대화 기록을 모두 삭제할까요? 되돌릴 수 없습니다.")) {
+                        setChats([]);
+                        newChat();
+                      }
+                    }}
+                    disabled={!chats.length}
+                    className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-red-300 hover:text-red-700 disabled:opacity-40"
+                  >
+                    대화 기록 전체 삭제
+                  </button>
+                </div>
+              </section>
             </div>
           </div>
         </div>
@@ -1455,11 +1731,15 @@ export default function Page() {
 function Rich({ text }: { text: string }) {
   return (
     <>
-      {text.split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
+      {text.split(/(\*\*[^*]+\*\*|https?:\/\/[^\s)<>"']+)/g).map((p, i) =>
         p.startsWith("**") && p.endsWith("**") ? (
           <strong key={i} className="font-semibold text-slate-900">
             {p.slice(2, -2)}
           </strong>
+        ) : /^https?:\/\//.test(p) ? (
+          <a key={i} href={p} target="_blank" rel="noreferrer" className="break-all text-brand-700 underline underline-offset-2 hover:text-brand-600">
+            {p}
+          </a>
         ) : (
           p
         )
@@ -1593,16 +1873,30 @@ function KeyField({
   value,
   onChange,
   placeholder,
+  ok,
+  link,
 }: {
   label: string;
   hint: string;
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
+  ok?: boolean;
+  link?: { href: string; text: string };
 }) {
   return (
     <label className="block">
-      <span className="text-[13px] font-medium">{label}</span>
+      <span className="flex items-center justify-between text-[13px] font-medium">
+        <span className="flex items-center gap-2">
+          {label}
+          {ok && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">연결됨</span>}
+        </span>
+        {link && (
+          <a href={link.href} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-normal text-brand-700 hover:underline">
+            {link.text} <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
+      </span>
       <input
         type="password"
         autoComplete="off"
