@@ -7,7 +7,7 @@ const base = process.env.BASE_URL || "http://localhost:3000";
 const post = async (path, body) =>
   (await fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
 const set = (dir) =>
-  readdirSync(`public/sample-docs/${dir}`).map((f) => ({
+  readdirSync(`public/sample-docs/${dir}`).filter((f) => f.endsWith(".txt")).map((f) => ({
     fileName: f,
     mimeType: "text/plain",
     base64OrText: readFileSync(`public/sample-docs/${dir}/${f}`, "utf8"),
