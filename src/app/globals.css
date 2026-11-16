@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#F4F7FB] text-[#1D2433] antialiased selection:bg-[#256EF4] selection:text-white;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+    word-break: keep-all;
+  }
+}
+
+/* 정부24 AI국민비서 그라데이션 캡슐 테두리 */
+.ai-bar-border {
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    linear-gradient(90deg, #00b8a9 0%, #256ef4 100%) border-box;
+  border: 2px solid transparent;
+}
+
+.ai-pill-btn {
+  background: linear-gradient(90deg, #00b8a9 0%, #1d64f2 100%);
+}
+
+/* 깔끔한 스크롤바 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d8e4;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9aa6b8;
+}
