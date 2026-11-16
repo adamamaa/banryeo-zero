@@ -1,4 +1,4 @@
-export const GEMINI_MODEL = "gemini-2.5-flash";
+export const GEMINI_MODEL = "gemini-4-hydrogen";
 
 // 키는 URL이 아니라 헤더로 보낸다 (URL 쿼리는 서버·프록시 로그에 남는다).
 export function callGemini(apiKey: string, body: Record<string, unknown>) {
@@ -12,13 +12,30 @@ export function callGemini(apiKey: string, body: Record<string, unknown>) {
   );
 }
 
-export async function geminiText(res: Response): Promise<string> {
-  const data = await res.json();
-  return (data?.candidates?.[0]?.content?.parts || [])
-    .map((p: { text?: string }) => p.text || "")
-    .join("\n")
-    .trim();
+export interface WebSource {
+  title: string;
+  url: string;
 }
+
+// 답변 본문과, 구글 검색 그라운딩을 썼다면 그 출처 목록을 함께 꺼낸다.
+export async function geminiParse(res: Response): Promise<{ text: string; sources: WebSource[] }> {
+  const cand = (await res.json())?.candidates?.[0];
+  const text = (cand?.content?.parts || [])
+    .map((p: { text?: string }) => p.text || "")
+    .join("")
+    .trim();
+  const seen = new Set<string>();
+  const sources: WebSource[] = [];
+  for (const c of cand?.groundingMetadata?.groundingChunks || []) {
+    const url = String(c?.web?.uri || "");
+    if (!/^https:\/\//.test(url) || seen.has(url)) continue;
+    seen.add(url);
+    sources.push({ title: String(c.web.title || new URL(url).hostname).slice(0, 80), url });
+  }
+  return { text, sources: sources.slice(0, 8) };
+}
+
+export const geminiText = async (res: Response) => (await geminiParse(res)).text;
 
 export function maskPii(text: string) {
   let count = 0;

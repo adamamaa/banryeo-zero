@@ -34,4 +34,16 @@ const b = await post("/api/agent/run", { action: "ocr_audit_docs", uploadedDocs:
 assert.equal(risks(b).length, 0, JSON.stringify(risks(b).map((f) => f.title)));
 assert.ok(b.auditResult.crossCheckMatrix.every((m) => m.status === "pass"));
 
+// 키 없는 채팅: 월세 조건 질문은 자격 계산, 그 밖의 질문은 일반 답변 경로
+const chat = (userMessage) => post("/api/agent/run", { action: "agent_chat", apiKey: "", userMessage });
+if (!process.env.GEMINI_API_KEY) {
+  const rent = await chat("월세가 70만 원을 넘어도 받을 수 있나요?");
+  assert.equal(rent.kind, "eligibility");
+  assert.equal(rent.summary.medianRatioPercent, 50.7);
+  const general = await chat("국민취업지원제도는 누가 신청할 수 있나요?");
+  assert.equal(general.kind, "general");
+  assert.equal(general.needsKey, true);
+  assert.equal(general.summary, undefined);
+}
+
 console.log("smoke ok");

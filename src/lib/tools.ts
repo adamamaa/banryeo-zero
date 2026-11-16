@@ -37,18 +37,39 @@ export interface ToolChainParams {
 const won = (n: number) => `${n.toLocaleString("ko-KR")}원`;
 const policy = POLICY_SCENARIOS[0];
 
-export async function fetchGov24Services(key: string): Promise<string[]> {
+export interface Gov24Service {
+  name: string;
+  org: string;
+  summary: string;
+  url: string;
+}
+
+// ponytail: 질문에서 주제어를 목록 대조로 고른다. 목록에 없는 주제는 "청년"으로 조회됨.
+// 조회 품질이 부족하면 LLM 키워드 추출로 교체.
+const TOPICS = [
+  "월세", "전세", "주거", "취업", "구직", "일자리", "창업", "적금", "저축", "자산", "대출",
+  "장학", "학자금", "교육", "훈련", "자격증", "면접", "교통", "문화", "건강", "심리", "출산", "육아", "결혼",
+];
+export const subsidyKeyword = (question: string) =>
+  TOPICS.find((t) => question.includes(t)) || "청년";
+
+export async function fetchGov24Services(key: string, keyword = "청년월세"): Promise<Gov24Service[]> {
   try {
     const url = new URL("https://api.odcloud.kr/api/gov24/v3/serviceList");
     url.searchParams.set("page", "1");
     url.searchParams.set("perPage", "5");
-    url.searchParams.set("cond[서비스명::LIKE]", "청년월세");
+    url.searchParams.set("cond[서비스명::LIKE]", keyword);
     const res = await fetch(url, { headers: { Authorization: `Infuser ${key}` } });
     if (!res.ok) return [];
     const data = await res.json();
     return (data?.data || [])
-      .map((d: Record<string, string>) => d["서비스명"])
-      .filter(Boolean);
+      .filter((d: Record<string, string>) => d["서비스명"])
+      .map((d: Record<string, string>) => ({
+        name: String(d["서비스명"]),
+        org: String(d["소관기관명"] || ""),
+        summary: String(d["서비스목적요약"] || d["지원내용"] || "").slice(0, 200),
+        url: /^https:\/\//.test(d["상세조회URL"] || "") ? d["상세조회URL"] : "",
+      }));
   } catch {
     return [];
   }
@@ -81,7 +102,7 @@ export async function runToolChain(p: ToolChainParams) {
       source: liveServices.length ? "live" : "sample",
       input: { 만나이: `${p.age}세`, 거주지: p.region, 월소득: `${p.monthlyIncomeManwon}만 원` },
       output: liveServices.length
-        ? Object.fromEntries(liveServices.map((s, i) => [`조회결과 ${i + 1}`, s]))
+        ? Object.fromEntries(liveServices.map((s, i) => [`조회결과 ${i + 1}`, s.name]))
         : {
             대상사업: `${policy.title} (${policy.maxBenefitText})`,
             안내: "공공데이터포털 키를 넣으면 보조금24 API 실시간 조회로 바뀝니다.",

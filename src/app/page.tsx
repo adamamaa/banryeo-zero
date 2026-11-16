@@ -61,6 +61,7 @@ interface Message {
   traces?: ToolExecution[];
   artifact?: { view: View; title: string; meta: string };
   followUps?: MissionKey[];
+  sources?: { title: string; url: string; registered?: boolean }[];
 }
 
 interface Staged {
@@ -506,7 +507,8 @@ export default function Page() {
     const id = pushTurn({ content: text, attachments: files.map((f) => f.fileName) });
 
     try {
-      if (files.length) {
+      // 첨부만 보내거나 검수를 요청하면 서류 검수, 질문을 함께 쓰면 첨부 문서 기반 답변
+      if (files.length && (!input.trim() || /검수|점검|반려/.test(text))) {
         const res = await fetch("/api/agent/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -553,6 +555,11 @@ export default function Page() {
           apiKey: geminiKey,
           publicDataApiKey: publicKey,
           userMessage: text,
+          uploadedDocs: files,
+          history: messages
+            .filter((m) => !m.pending && !m.error && m.content)
+            .slice(-8)
+            .map(({ role, content }) => ({ role, content })),
           sites: myTools.map(({ name, url }) => ({ name, url })),
           userProfile: {
             age: profile.age,
@@ -568,18 +575,24 @@ export default function Page() {
         patch(id, { content: data.message || "답변을 만들지 못했습니다.", error: true });
         return;
       }
-      setView("triage");
-      setCanvasOpen(true);
+      const eligibility = data.kind === "eligibility";
+      if (eligibility) {
+        setView("triage");
+        setCanvasOpen(true);
+      }
       patch(id, {
         content:
           data.reply +
-          (data.mode === "local_rules" && !geminiKey
-            ? "\n\n지금은 입력된 조건의 계산 결과만 안내합니다. 연결 설정에서 Gemini API 키를 넣으면 질문 내용에 맞춰 답변합니다."
+          (data.needsKey
+            ? "\n\n연결 설정에서 Gemini API 키를 넣으면 등록한 사이트를 검색해 질문 내용에 맞춰 답변합니다."
             : "") +
           relatedLinks(text, data.reply),
         traces: data.toolExecutions,
-        artifact: { view: "triage", title: "자격 판정 결과", meta: "입력 조건 기준 계산" },
-        followUps: ["recipe", "audit_defect"],
+        sources: data.sources,
+        ...(eligibility && {
+          artifact: { view: "triage" as View, title: "자격 판정 결과", meta: "입력 조건 기준 계산" },
+          followUps: ["recipe", "audit_defect"] as MissionKey[],
+        }),
       });
     } catch {
       patch(id, { content: "요청을 처리하지 못했습니다. 네트워크 상태를 확인하세요.", error: true });
@@ -787,7 +800,7 @@ export default function Page() {
                     {[
                       "월세가 70만 원을 넘어도 받을 수 있나요?",
                       "주민등록등본은 어디서 어떻게 발급하나요?",
-                      "부모님 소득이 높으면 탈락인가요?",
+                      "국민취업지원제도는 누가 신청할 수 있나요?",
                     ].map((q) => (
                       <button
                         key={q}
@@ -868,6 +881,28 @@ export default function Page() {
                             <Rich text={msg.content} />
                           </div>
 
+                          {msg.sources && msg.sources.length > 0 && (
+                            <div>
+                              <div className="text-xs font-medium text-slate-500">출처</div>
+                              <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                                {msg.sources.map((s) => (
+                                  <li key={s.url}>
+                                    <a
+                                      href={s.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className={`inline-flex max-w-[16rem] items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-slate-50 ${s.registered ? "border-brand-600/40 text-brand-700" : "border-slate-200 text-slate-600"}`}
+                                    >
+                                      <span className="truncate">{s.title}</span>
+                                      {s.registered && <span className="shrink-0 font-medium">· 내 도구</span>}
+                                      <ExternalLink className="h-3 w-3 shrink-0" />
+                                    </a>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
                           {msg.artifact && (
                             <button
                               onClick={() => {
@@ -941,7 +976,7 @@ export default function Page() {
                 }
               }}
               aria-label="메시지 입력"
-              placeholder="조건을 입력하거나 서류를 첨부하세요"
+              placeholder="청년 정책을 물어보거나 공고문·서류를 첨부하세요"
               className="block w-full resize-none bg-transparent px-4 pt-3 text-sm placeholder:text-slate-400 focus:outline-none"
             />
             <div className="flex items-center justify-between px-2.5 pb-2.5">
@@ -1555,7 +1590,7 @@ export default function Page() {
               <section>
                 <h3 className="text-[13px] font-semibold">사이트</h3>
                 <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                  추가한 사이트는 왼쪽 &lsquo;내 도구&rsquo;에 모이고, 답변에서 관련 링크로 안내됩니다. 로그인은 각
+                  추가한 사이트는 왼쪽 &lsquo;내 도구&rsquo;에 모이고, 답변할 때 이 사이트부터 검색해 출처로 표시합니다. 로그인은 각
                   사이트에서 직접 합니다. 이 앱은 인증서나 비밀번호를 받지 않습니다.
                 </p>
                 <ul className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
