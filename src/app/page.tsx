@@ -50,6 +50,34 @@ interface Profile {
   sepMonths: number;
 }
 
+type ProfileInput = Record<keyof Profile, number | "">;
+
+const EMPTY_PROFILE: ProfileInput = {
+  age: "",
+  incomeManwon: "",
+  depositManwon: "",
+  rentManwon: "",
+  sepMonths: "",
+};
+
+const DEMO_PROFILE: Profile = {
+  age: 26,
+  incomeManwon: 130,
+  depositManwon: 1000,
+  rentManwon: 75,
+  sepMonths: 15,
+};
+
+const toProfile = (p: ProfileInput): Profile => ({
+  age: Number(p.age) || 0,
+  incomeManwon: Number(p.incomeManwon) || 0,
+  depositManwon: Number(p.depositManwon) || 0,
+  rentManwon: Number(p.rentManwon) || 0,
+  sepMonths: Number(p.sepMonths) || 0,
+});
+
+const hasProfileInput = (p: ProfileInput) => Object.values(p).some((v) => v !== "");
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -208,13 +236,7 @@ export default function Page() {
   const [maskOnScreen, setMaskOnScreen] = useState(true);
   const [sidebarSearch, setSidebarSearch] = useState("");
 
-  const [profile, setProfile] = useState<Profile>({
-    age: 26,
-    incomeManwon: 130,
-    depositManwon: 1000,
-    rentManwon: 75,
-    sepMonths: 15,
-  });
+  const [profile, setProfile] = useState<ProfileInput>(EMPTY_PROFILE);
   const [tools, setTools] = useState<ToolExecution[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -318,10 +340,11 @@ export default function Page() {
     maskOnScreen ? v.replace(/(\d{6})-([1-4])\d{6}/g, "$1-$2******") : v;
 
   const fetchTools = async (
-    p: Profile = profile,
+    p: Profile | ProfileInput = profile,
     mode: "defect" | "fixed" = auditMode === "fixed" ? "fixed" : "defect",
     signal?: AbortSignal
   ) => {
+    const resolved = "age" in p && typeof p.age === "number" ? (p as Profile) : toProfile(p as ProfileInput);
     setToolsLoading(true);
     try {
       const res = await fetch("/api/agent/execute", {
@@ -329,12 +352,12 @@ export default function Page() {
         headers: { "Content-Type": "application/json" },
         signal,
         body: JSON.stringify({
-          age: p.age,
+          age: resolved.age,
           region: REGION,
-          monthlyIncomeManwon: p.incomeManwon,
-          depositManwon: p.depositManwon,
-          monthlyRentManwon: p.rentManwon,
-          separateLivingMonths: p.sepMonths,
+          monthlyIncomeManwon: resolved.incomeManwon,
+          depositManwon: resolved.depositManwon,
+          monthlyRentManwon: resolved.rentManwon,
+          separateLivingMonths: resolved.sepMonths,
           auditMode: mode,
           publicDataApiKey: publicKey,
           essayText: essay,
@@ -378,7 +401,6 @@ export default function Page() {
     setGeminiKey(g);
     setPublicKey(localStorage.getItem("gonggopass_public_key") || "");
     verifyKey(g);
-    fetchTools();
     setChats(loadLocal<Chat[]>("gonggopass_chats", []));
     const saved = loadLocal<{ added: string[]; custom: Site[] } | null>("gonggopass_tools", null);
     if (saved) {
@@ -586,8 +608,10 @@ export default function Page() {
     const m = MISSIONS[key];
     setCtx("demo");
     if (m.mode) setAuditMode(m.mode);
+    const activeProfile = hasProfileInput(profile) ? toProfile(profile) : DEMO_PROFILE;
+    if (!hasProfileInput(profile)) setProfile(DEMO_PROFILE);
     const s0 = summary;
-    const copy0 = s0 ? missionCopy(key, s0, profile) : null;
+    const copy0 = s0 ? missionCopy(key, s0, activeProfile) : null;
     const id = pushTurn({
       content: copy0?.user || m.label,
       demo: true,
@@ -657,7 +681,7 @@ export default function Page() {
     const ac = new AbortController();
     abortRef.current = ac;
 
-    const data = await fetchTools(profile, m.mode ?? (auditMode === "fixed" ? "fixed" : "defect"), ac.signal);
+    const data = await fetchTools(activeProfile, m.mode ?? (auditMode === "fixed" ? "fixed" : "defect"), ac.signal);
     await new Promise((r) => setTimeout(r, 650));
     await waitWhilePaused();
 
@@ -669,7 +693,7 @@ export default function Page() {
       setAgentActive(false);
       setAgentScanning(false);
     } else {
-      const copy = missionCopy(key, data.summary, profile);
+      const copy = missionCopy(key, data.summary, activeProfile);
       const next: Record<MissionKey, MissionKey[]> = {
         triage: ["recipe"],
         recipe: ["audit_defect"],
@@ -846,13 +870,15 @@ export default function Page() {
             .slice(-8)
             .map(({ role, content }) => ({ role, content })),
           sites: myTools.map(({ name, url }) => ({ name, url })),
-          userProfile: {
-            age: profile.age,
-            income: profile.incomeManwon,
-            deposit: profile.depositManwon,
-            rent: profile.rentManwon,
-            sepMonths: profile.sepMonths,
-          },
+          userProfile: hasProfileInput(profile)
+            ? {
+                age: Number(profile.age) || 0,
+                income: Number(profile.incomeManwon) || 0,
+                deposit: Number(profile.depositManwon) || 0,
+                rent: Number(profile.rentManwon) || 0,
+                sepMonths: Number(profile.sepMonths) || 0,
+              }
+            : undefined,
         }),
       });
       const data = await res.json();
@@ -1580,7 +1606,7 @@ export default function Page() {
                     action={
                       <button
                         onClick={() => fetchTools()}
-                        disabled={toolsLoading}
+                        disabled={toolsLoading || !hasProfileInput(profile)}
                         className="flex items-center gap-1.5 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-700 active:translate-y-px disabled:opacity-60"
                       >
                         <RefreshCw className={`h-3.5 w-3.5 ${toolsLoading ? "animate-spin" : ""}`} />
@@ -1605,8 +1631,12 @@ export default function Page() {
                             type="number"
                             min={0}
                             value={profile[k]}
-                            onChange={(e) => setProfile((p) => ({ ...p, [k]: Math.max(0, Number(e.target.value)) }))}
-                            className="tnum w-full min-w-0 bg-transparent px-2 py-1.5 text-sm focus:outline-none"
+                            placeholder="입력"
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              setProfile((p) => ({ ...p, [k]: raw === "" ? "" : Math.max(0, Number(raw)) }));
+                            }}
+                            className="tnum w-full min-w-0 bg-transparent px-2 py-1.5 text-sm placeholder:text-slate-300 focus:outline-none"
                           />
                           <span className="shrink-0 pr-2 text-xs text-slate-400">{unit}</span>
                         </span>
@@ -1621,7 +1651,7 @@ export default function Page() {
                     desc={`실계산 ${tools.filter((t) => t.source === "calc").length} · 예시 데이터 ${tools.filter((t) => t.source === "sample").length} · 실시간 API ${tools.filter((t) => t.source === "live").length}`}
                   />
                   {tools.length === 0 ? (
-                    <Empty text={toolsLoading ? "도구를 실행하는 중입니다" : "실행 내역이 없습니다. 다시 계산을 눌러 주세요."} />
+                    <Empty text={toolsLoading ? "도구를 실행하는 중입니다" : "아직 실행된 내역이 없습니다. 위 조건을 입력하고 다시 계산을 누르거나 시연을 실행하세요."} />
                   ) : (
                     <ToolList tools={tools} />
                   )}
@@ -1652,7 +1682,7 @@ export default function Page() {
                         label="환산 합산 월세"
                         value={won(summary.totalConvertedRentKRW)}
                         note="상한 900,000원"
-                        ok={summary.totalConvertedRentKRW <= 900000 || profile.rentManwon <= 70}
+                        ok={summary.totalConvertedRentKRW <= 900000 || (Number(profile.rentManwon) || 0) <= 70}
                       />
                       <Stat
                         label="독립가구 특례"
