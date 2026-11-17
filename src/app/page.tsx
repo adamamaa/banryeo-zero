@@ -824,8 +824,17 @@ export default function Page() {
     <div className="h-dvh w-screen overflow-hidden antialiased text-slate-800 selection:bg-brand-100 selection:text-brand-700">
       <div className="flex h-full w-full overflow-hidden bg-white">
         {/* ───────── 사이드바 ───────── */}
-        {sidebarOpen && (
-          <aside className="w-[270px] shrink-0 bg-[#fbfbfb] border-r border-slate-100 flex flex-col justify-between p-4 selection:bg-purple-200 max-lg:hidden animate-slide-in-left">
+        <aside
+          aria-hidden={!sidebarOpen}
+          className={`shrink-0 overflow-hidden bg-[#fbfbfb] selection:bg-purple-200 max-lg:hidden transition-[width,opacity,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            sidebarOpen ? "w-[270px] border-r border-slate-100 opacity-100" : "w-0 border-r-0 opacity-0 pointer-events-none"
+          }`}
+        >
+          <div
+            className={`flex h-full w-[270px] flex-col justify-between p-4 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              sidebarOpen ? "translate-x-0" : "-translate-x-4"
+            }`}
+          >
             <div className="flex flex-col space-y-4">
               <div className="flex items-center justify-between px-1.5 pt-1">
                 <div className="flex items-center space-x-2.5">
@@ -975,8 +984,8 @@ export default function Page() {
                 </span>
               </div>
             </div>
-          </aside>
-        )}
+          </div>
+        </aside>
 
         {/* ───────── 메인 워크스페이스 ───────── */}
         <main className="flex-1 flex flex-col bg-white overflow-hidden relative justify-between min-w-0">
@@ -1267,8 +1276,19 @@ export default function Page() {
         </main>
 
       {/* ───────── 결과 패널 ───────── */}
-      {canvasOpen && (
-        <section className="flex w-[48%] min-w-[420px] shrink-0 flex-col border-l border-slate-100 bg-[#fbfbfb] max-lg:fixed max-lg:inset-0 max-lg:z-30 max-lg:w-full max-lg:min-w-0 animate-slide-in-right">
+      <section
+        aria-hidden={!canvasOpen}
+        className={`flex shrink-0 flex-col overflow-hidden bg-[#fbfbfb] transition-[width,opacity,transform,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] max-lg:fixed max-lg:inset-0 max-lg:z-30 max-lg:w-full ${
+          canvasOpen
+            ? "lg:w-[46%] lg:border-l lg:border-slate-100 opacity-100 max-lg:translate-x-0"
+            : "lg:w-0 lg:border-l-0 opacity-0 pointer-events-none max-lg:translate-x-full"
+        }`}
+      >
+        <div
+          className={`flex h-full w-full min-w-[380px] max-lg:min-w-0 flex-col transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            canvasOpen ? "translate-x-0" : "lg:translate-x-6"
+          }`}
+        >
           <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-100 bg-white/80 px-4 backdrop-blur">
             <PanelTabs
               tabs={focusMsg ? [{ id: "answer" as View, label: "답변 근거" }, ...VIEWS] : VIEWS}
@@ -1732,8 +1752,8 @@ export default function Page() {
               </>
             )}
           </div>
-        </section>
-      )}
+        </div>
+      </section>
 
       {/* ───────── 도구 · 연결 ───────── */}
       {showTools && (
@@ -3009,14 +3029,19 @@ function PanelTabs({
   useEffect(() => {
     const measure = () => {
       const el = listRef.current?.querySelector<HTMLButtonElement>(`[data-tab="${value}"]`);
-      if (el) {
+      if (el && el.offsetWidth > 0) {
         setInd({ left: el.offsetLeft, width: el.offsetWidth });
         el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
       }
     };
     measure();
+    const ro = typeof ResizeObserver !== "undefined" && listRef.current ? new ResizeObserver(measure) : null;
+    if (ro && listRef.current) ro.observe(listRef.current);
     window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
   }, [value, tabs.length]);
 
   return (
