@@ -881,8 +881,8 @@ export default function Page() {
   );
 
   return (
-    <div className="bg-ethereal-mesh min-h-dvh p-2 md:p-5 lg:p-6 flex items-center justify-center antialiased text-slate-800 selection:bg-brand-100 selection:text-brand-700">
-      <div className="w-full max-w-[1380px] h-[calc(100dvh-1rem)] md:h-[calc(100dvh-2.5rem)] lg:h-[calc(100dvh-3rem)] max-h-[860px] bg-white rounded-[2rem] shadow-app border border-white/60 flex overflow-hidden backdrop-blur-md">
+    <div className="h-dvh w-screen overflow-hidden antialiased text-slate-800 selection:bg-brand-100 selection:text-brand-700">
+      <div className="flex h-full w-full overflow-hidden bg-white">
         {/* ───────── 사이드바 (Cortex LeftSidebar) ───────── */}
         {sidebarOpen && (
           <aside className="w-[270px] shrink-0 bg-[#fbfbfb] border-r border-slate-100 flex flex-col justify-between p-4 selection:bg-purple-200 max-lg:hidden">
