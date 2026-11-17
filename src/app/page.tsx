@@ -825,7 +825,7 @@ export default function Page() {
       <div className="flex h-full w-full overflow-hidden bg-white">
         {/* ───────── 사이드바 ───────── */}
         {sidebarOpen && (
-          <aside className="w-[270px] shrink-0 bg-[#fbfbfb] border-r border-slate-100 flex flex-col justify-between p-4 selection:bg-purple-200 max-lg:hidden">
+          <aside className="w-[270px] shrink-0 bg-[#fbfbfb] border-r border-slate-100 flex flex-col justify-between p-4 selection:bg-purple-200 max-lg:hidden animate-slide-in-left">
             <div className="flex flex-col space-y-4">
               <div className="flex items-center justify-between px-1.5 pt-1">
                 <div className="flex items-center space-x-2.5">
@@ -1029,18 +1029,18 @@ export default function Page() {
                 <div className="w-full flex flex-col items-center">
                   <div className="flex flex-col items-center text-center mb-5">
                     <LiquidOrb />
-                    <h2 className="text-xl font-medium text-brand-400 tracking-tight mb-1">
+                    <h2 className="animate-fade-up delay-2 text-xl font-medium text-brand-400 tracking-tight mb-1">
                       공고패스 AI 사전 점검
                     </h2>
-                    <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                    <h1 className="animate-fade-up delay-3 text-2xl font-bold text-slate-900 tracking-tight">
                       지원금 신청서, 내기 전에 먼저 점검하세요
                     </h1>
-                    <p className="mt-1.5 text-xs text-slate-500">
+                    <p className="animate-fade-up delay-4 mt-1.5 text-xs text-slate-500">
                       공고문 조건으로 자격을 계산하고 준비한 서류를 접수 기준에 맞춰 제출 전에 검수합니다.
                     </p>
                   </div>
 
-                  <div className="w-full mb-5">{promptCard}</div>
+                  <div className="animate-fade-up delay-5 w-full mb-5">{promptCard}</div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full">
                     {(["triage", "recipe", "audit_defect", "audit_fixed"] as MissionKey[]).map((k, idx) => (
@@ -1048,7 +1048,8 @@ export default function Page() {
                         key={k}
                         onClick={() => runMission(k)}
                         disabled={working}
-                        className="p-3.5 text-left bg-slate-50/70 hover:bg-slate-50 border border-slate-100 rounded-xl hover:border-purple-200 transition-all group disabled:opacity-50"
+                        style={{ animationDelay: `${420 + idx * 70}ms` }}
+                        className="animate-fade-up hover-lift p-3.5 text-left bg-slate-50/70 hover:bg-white border border-slate-100 rounded-xl hover:border-purple-200 group disabled:opacity-50"
                       >
                         <div className="mb-2 flex items-center justify-between text-slate-600 group-hover:text-purple-600 transition-colors">
                           {idx === 0 && (
@@ -1088,7 +1089,7 @@ export default function Page() {
                 <div className="w-full space-y-6 py-2">
                   {messages.map((msg) =>
                     msg.role === "user" ? (
-                      <div key={msg.id} className="flex flex-col items-end gap-1.5">
+                      <div key={msg.id} className="animate-fade-up flex flex-col items-end gap-1.5">
                         {msg.attachments && msg.attachments.length > 0 && (
                           <div className="flex flex-wrap justify-end gap-1.5">
                             {msg.attachments.map((a) => (
@@ -1107,7 +1108,7 @@ export default function Page() {
                     ) : (
                       <div
                         key={msg.id}
-                        className={`space-y-3 ${canvasOpen && view === "answer" && focusId === msg.id ? "-ml-4 border-l-2 border-brand-600 pl-[14px]" : ""}`}
+                        className={`animate-fade-up space-y-3 transition-all duration-300 ${canvasOpen && view === "answer" && focusId === msg.id ? "-ml-4 border-l-2 border-brand-600 pl-[14px]" : ""}`}
                       >
                         {msg.pending ? (
                           <div className="flex items-center gap-2 text-sm text-slate-500">
@@ -1260,7 +1261,7 @@ export default function Page() {
 
       {/* ───────── 결과 패널 ───────── */}
       {canvasOpen && (
-        <section className="flex w-[48%] min-w-[420px] shrink-0 flex-col border-l border-slate-200 bg-slate-50 max-lg:fixed max-lg:inset-0 max-lg:z-30 max-lg:w-full max-lg:min-w-0">
+        <section className="flex w-[48%] min-w-[420px] shrink-0 flex-col border-l border-slate-200 bg-slate-50 max-lg:fixed max-lg:inset-0 max-lg:z-30 max-lg:w-full max-lg:min-w-0 animate-slide-in-right">
           <div className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 bg-white pl-4 pr-2">
             <div role="tablist" className="flex h-full items-stretch gap-5 overflow-x-auto">
               {(focusMsg ? [{ id: "answer" as View, label: "답변 근거" }, ...VIEWS] : VIEWS).map((v) => (
@@ -1284,7 +1285,7 @@ export default function Page() {
             </IconButton>
           </div>
 
-          <div className="flex-1 space-y-4 overflow-y-auto p-5">
+          <div key={view + ctx} className="animate-fade-in flex-1 space-y-4 overflow-y-auto p-5">
             {view !== "answer" && policyOptions.length > 0 && (
               <label className="flex items-center gap-2 text-xs text-slate-500">
                 <span className="shrink-0">기준 정책</span>
@@ -1741,13 +1742,13 @@ export default function Page() {
 
       {/* ───────── 도구 · 연결 ───────── */}
       {showTools && (
-        <div className="fixed inset-0 z-40 grid place-items-center bg-slate-900/40 p-4" onClick={() => setShowTools(false)}>
+        <div className="fixed inset-0 z-40 grid place-items-center bg-slate-900/40 backdrop-blur-[2px] p-4 animate-fade-in" onClick={() => setShowTools(false)}>
           <div
             role="dialog"
             aria-modal="true"
             aria-label="도구와 연결"
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[88dvh] w-full max-w-lg flex-col rounded-xl border border-slate-200 bg-white shadow-xl"
+            className="flex max-h-[88dvh] w-full max-w-lg flex-col rounded-2xl border border-slate-200 bg-white shadow-xl animate-scale-in"
           >
             <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-3.5">
               <h2 className="text-sm font-semibold">도구와 연결</h2>
@@ -2115,7 +2116,7 @@ void main() {
   }, []);
 
   return (
-    <div className="w-36 h-36 mx-auto mb-3 relative z-10">
+    <div className="animate-orb w-36 h-36 mx-auto mb-3 relative z-10">
       <canvas ref={canvasRef} className="block w-full h-full" />
     </div>
   );

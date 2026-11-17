@@ -34,6 +34,98 @@
     radial-gradient(at 80% 40%, #e2d1f7 0px, transparent 40%);
 }
 
+/* ───── 부드러운 모션 ───── */
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* 버튼·링크·입력 전반에 부드러운 전환 */
+button,
+a,
+label,
+input,
+textarea,
+select {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 220ms;
+  transition-timing-function: var(--ease-out);
+}
+button:not(:disabled):active,
+label:active {
+  transform: scale(0.97);
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes orb-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes orb-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.animate-fade-up { animation: fade-up 480ms var(--ease-out) both; }
+.animate-fade-in { animation: fade-in 320ms var(--ease-out) both; }
+.animate-slide-in-right { animation: slide-in-right 420ms var(--ease-out) both; }
+.animate-slide-in-left { animation: slide-in-left 380ms var(--ease-out) both; }
+.animate-scale-in { animation: scale-in 360ms var(--ease-spring) both; }
+.animate-orb {
+  animation: orb-in 900ms var(--ease-spring) both, orb-float 5s ease-in-out 900ms infinite;
+}
+
+.delay-1 { animation-delay: 60ms; }
+.delay-2 { animation-delay: 120ms; }
+.delay-3 { animation-delay: 180ms; }
+.delay-4 { animation-delay: 240ms; }
+.delay-5 { animation-delay: 300ms; }
+.delay-6 { animation-delay: 360ms; }
+
+/* 카드 hover 시 살짝 떠오르기 */
+.hover-lift {
+  transition: transform 260ms var(--ease-out), box-shadow 260ms var(--ease-out), border-color 260ms var(--ease-out),
+    background-color 260ms var(--ease-out);
+}
+.hover-lift:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px -12px rgba(126, 34, 206, 0.25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Hide scrollbars gracefully */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
