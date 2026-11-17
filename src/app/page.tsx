@@ -1427,19 +1427,6 @@ export default function Page() {
                   <PanelLeft className="h-4 w-4" />
                 </IconButton>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  setView("triage");
-                  setCanvasOpen(true);
-                }}
-                className="inline-flex items-center space-x-2 bg-slate-50 hover:bg-slate-100 border border-slate-200/80 px-2.5 py-1.5 rounded-full text-xs font-medium text-slate-800 transition-all"
-              >
-                <div className="w-4 h-4 rounded-md bg-purple-200 flex items-center justify-center text-purple-700 text-[10px]">
-                  ✦
-                </div>
-                <span>{policy.title}</span>
-              </button>
             </div>
 
             <div className="flex items-center space-x-2">
