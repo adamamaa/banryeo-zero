@@ -1096,15 +1096,22 @@ export default function Page() {
         }),
       });
       if (eligibility) {
-        finishAgentWithTarget("자격 판정 결과를 패널에 정리했습니다.", [
+        finishAgentWithTarget("자격 판정과 발급 서류를 탭별로 정리했습니다.", [
           { tab: "triage", selector: "triage-verdict", label: "자격 판정 결과" },
           { tab: "triage", selector: "triage-rent", label: "환산 합산 월세" },
-          { tab: "triage", selector: "triage-special", label: "독립가구 특례" },
+          { tab: "recipe", selector: "recipe-docs", label: "필수 발급 서류" },
         ]);
       } else if (cardData && window.innerWidth >= 1024) {
-        finishAgentWithTarget("답변 근거와 출처를 정리했습니다.", [
+        const hasPolicies = Boolean(cardData.policies && cardData.policies.length > 0);
+        finishAgentWithTarget("답변 근거와 자격·발급 서류를 탭별로 정리했습니다.", [
           { tab: "answer", selector: "answer-summary", label: "답변 핵심 근거" },
-          { tab: "answer", selector: "answer-steps", label: "신청 체크리스트" },
+          ...(cardData.steps?.length ? [{ tab: "answer" as View, selector: "answer-steps", label: "신청 체크리스트" }] : []),
+          ...(hasPolicies
+            ? [
+                { tab: "triage" as View, selector: "triage-verdict", label: "자격 조건 확인" },
+                { tab: "recipe" as View, selector: "recipe-docs", label: "필요 서류 목록" },
+              ]
+            : []),
         ]);
       } else {
         finishAgentWithTarget("답변 정리를 완료했습니다.", null);
@@ -3166,12 +3173,12 @@ function PolicyTriage({
     <>
       <PolicyHead p={p} />
       {verdict && (
-        <div className={`rounded-2xl border px-4 py-3.5 shadow-sm ${verdict.cls}`}>
+        <div data-agent-target="triage-verdict" className={`rounded-2xl border px-4 py-3.5 shadow-sm ${verdict.cls}`}>
           <div className="text-sm font-semibold">{verdict.title}</div>
           <div className="mt-0.5 text-[13px] opacity-90">{verdict.body}</div>
         </div>
       )}
-      <Card>
+      <Card target={verdict ? "triage-conditions" : "triage-verdict"}>
         <CardHead title="자격 조건 확인" desc={`${yes} / ${n} 충족 · AI가 검색으로 정리한 조건`} />
         {n ? (
           <ul className="divide-y divide-slate-100">
@@ -3247,7 +3254,7 @@ function PolicyDocs({
   return (
     <>
       <PolicyHead p={p} />
-      <Card>
+      <Card target="recipe-docs">
         <CardHead title={`준비할 서류 ${p.documents.length}종`} desc={`준비 완료 ${done} / ${p.documents.length}`} />
         {p.documents.length ? (
           <ul className="divide-y divide-slate-100">
@@ -3403,7 +3410,7 @@ function PolicyPackage({
         <Stat label="서류 검수" value={risks === null ? "미실시" : `위험 ${risks}건`} note="사전 검수 탭에서 실행" ok={risks === 0} />
       </div>
       {steps.length > 0 && (
-        <Card>
+        <Card target="package-form">
           <CardHead title="신청 단계" />
           <ol className="divide-y divide-slate-100">
             {steps.map((s, i) => (
