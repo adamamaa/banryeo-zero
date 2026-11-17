@@ -37,6 +37,92 @@ export async function geminiParse(res: Response): Promise<{ text: string; source
 
 export const geminiText = async (res: Response) => (await geminiParse(res)).text;
 
+// Gemini SSE 스트리밍 호출: thinking(thought 파트)은 실시간 콜백으로 전달하고, 최종 텍스트와 출처를 반환한다.
+export async function streamGemini(
+  apiKey: string,
+  body: Record<string, unknown>,
+  onThought?: (thoughtText: string) => void,
+  signal?: AbortSignal
+): Promise<{ ok: true; text: string; sources: WebSource[] } | { ok: false; res: Response }> {
+  const genCfg = (body.generationConfig as Record<string, unknown> | undefined) || {};
+  const withThinking = {
+    ...body,
+    generationConfig: { ...genCfg, thinkingConfig: { includeThoughts: true } },
+  };
+
+  let res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify(withThinking),
+      signal,
+    }
+  );
+
+  // 모델/파라미터가 thinkingConfig를 거부(400)하면 thinkingConfig 없이 재시도
+  if (res.status === 400) {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify(body),
+        signal,
+      }
+    );
+  }
+
+  if (!res.ok || !res.body) {
+    return { ok: false, res };
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let text = "";
+  let thought = "";
+  const seen = new Set<string>();
+  const sources: WebSource[] = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split(/\r?\n/);
+    buf = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      const raw = line.slice(5).trim();
+      if (!raw || raw === "[DONE]") continue;
+      try {
+        const chunk = JSON.parse(raw);
+        const cand = chunk?.candidates?.[0];
+        for (const p of cand?.content?.parts || []) {
+          if (!p?.text) continue;
+          if (p.thought) {
+            thought += p.text;
+            onThought?.(thought);
+          } else {
+            text += p.text;
+          }
+        }
+        for (const c of cand?.groundingMetadata?.groundingChunks || []) {
+          const url = String(c?.web?.uri || "");
+          if (!/^https:\/\//.test(url) || seen.has(url)) continue;
+          seen.add(url);
+          sources.push({ title: String(c.web.title || new URL(url).hostname).slice(0, 80), url });
+        }
+      } catch {
+        // 불완전 청크 무시
+      }
+    }
+  }
+
+  return { ok: true, text: text.trim(), sources: sources.slice(0, 8) };
+}
+
 // 실패 응답을 사용자가 조치할 수 있는 문장으로 바꾼다.
 export async function geminiError(res: Response): Promise<string> {
   const msg = String((await res.json().catch(() => null))?.error?.message || "");

@@ -37,19 +37,31 @@ export function AgentPlanCard({
   onStop: () => void;
 }) {
   const [typed, setTyped] = useState("");
+  const prevThoughtRef = useRef("");
   useEffect(() => {
     if (!thought) {
       setTyped("");
+      prevThoughtRef.current = "";
       return;
     }
-    setTyped("");
-    let i = 0;
+    const prev = prevThoughtRef.current;
+    // 스트리밍으로 문장이 길어질 때는 처음부터 다시 지우지 않고 이어서 타이핑
+    let i = prev && thought.startsWith(prev) ? prev.length : 0;
+    prevThoughtRef.current = thought;
+    if (i === 0) setTyped("");
+    if (i >= thought.length) {
+      setTyped(thought);
+      return;
+    }
     const timer = window.setInterval(() => {
       if (paused) return;
-      i += 1;
+      i += 2;
       setTyped(thought.slice(0, i));
-      if (i >= thought.length) window.clearInterval(timer);
-    }, 18);
+      if (i >= thought.length) {
+        setTyped(thought);
+        window.clearInterval(timer);
+      }
+    }, 16);
     return () => window.clearInterval(timer);
   }, [thought, paused]);
 

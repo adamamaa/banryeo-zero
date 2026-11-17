@@ -856,6 +856,64 @@ export default function Page() {
     el.value = "";
     if (files.length && active) send(undefined, `${active.p.name} 서류를 검수해 주세요.`, files);
   };
+  // /api/agent/run SSE 스트리밍 호출: 서버 단계(step)와 Gemini 추론(thought)을 실시간으로 HUD에 반영한다.
+  const callRunStream = async (payload: Record<string, unknown>, signal: AbortSignal) => {
+    const res = await fetch("/api/agent/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({ ...payload, stream: true }),
+    });
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("text/event-stream") || !res.body) {
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, data };
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let finalOk = true;
+    let finalData: Record<string, unknown> = {};
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const blocks = buf.split(/\r?\n\r?\n/);
+      buf = blocks.pop() || "";
+
+      for (const block of blocks) {
+        let ev = "message";
+        let dataStr = "";
+        for (const line of block.split(/\r?\n/)) {
+          if (line.startsWith("event:")) ev = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+        }
+        if (!dataStr) continue;
+        try {
+          const parsed = JSON.parse(dataStr);
+          if (ev === "step") {
+            if (Array.isArray(parsed.steps)) setAgentSteps(parsed.steps);
+            if (typeof parsed.thought === "string") setAgentThought(parsed.thought);
+          } else if (ev === "thought" && typeof parsed.text === "string") {
+            setAgentThought(parsed.text);
+          } else if (ev === "result") {
+            finalOk = true;
+            finalData = parsed;
+          } else if (ev === "error") {
+            finalOk = false;
+            finalData = parsed;
+          }
+        } catch {
+          // 불완전 이벤트 무시
+        }
+      }
+    }
+
+    return { ok: finalOk, data: finalData };
+  };
+
   // ask: 후속 질문 칩처럼 입력창을 거치지 않고 바로 보내는 질문, filesArg: 패널에서 올린 서류
   const send = async (e?: React.FormEvent, ask?: string, filesArg?: Staged[]) => {
     e?.preventDefault();
@@ -875,66 +933,64 @@ export default function Page() {
     const ac = new AbortController();
     abortRef.current = ac;
 
-    if (isAudit) {
-      startAgentPlan(
-        ["첨부 서류 스캔", "필수 항목 판독", "교차 검증 리포트"],
-        [
-          `첨부된 서류 ${files.length}건의 텍스트·이미지를 스캔합니다.`,
-          "전입일, 확정일자, 상세 증명서 등 접수 기준을 대조합니다.",
-          "서류 간 성명·주소 일치 여부를 교차 검증합니다.",
-        ],
-        true
-      );
-    } else {
-      startAgentPlan(
-        ["질문 의도 분석", "정책·등록 사이트 탐색", "근거 카드 정리"],
-        [
-          "질문 내용에서 대상 정책과 조건 키워드를 추출합니다.",
-          "등록된 정부 사이트 및 공고 기준을 검색해 확인합니다.",
-          "핵심 조건과 신청 단계를 한눈에 볼 수 있게 정리합니다.",
-        ],
-        files.length > 0
-      );
-    }
+    clearAgentTimers();
+    stoppedRef.current = false;
+    pausedRef.current = false;
+    setAgentPaused(false);
+    setAgentActive(true);
+    setAgentScanning(isAudit || files.length > 0);
+    setAgentTarget(null);
+    setMarkedTargets({});
+    setAgentSteps(
+      isAudit
+        ? [
+            { label: "첨부 서류 전처리", status: "active" },
+            { label: "서류 판독 · 규칙 점검", status: "pending" },
+            { label: "교차 검증 리포트", status: "pending" },
+          ]
+        : [
+            { label: "질문 의도 분석", status: "active" },
+            { label: "정책·등록 사이트 탐색", status: "pending" },
+            { label: "근거 카드 정리", status: "pending" },
+          ]
+    );
+    setAgentThought("서버와 연결해 실시간 분석을 시작합니다...");
 
     try {
       // 첨부만 보내거나 검수를 요청하면 서류 검수, 질문을 함께 쓰면 첨부 문서 기반 답변
       if (isAudit) {
-        const res = await fetch("/api/agent/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: ac.signal,
-          body: JSON.stringify({
+        const { ok, data } = await callRunStream(
+          {
             action: "ocr_audit_docs",
             apiKey: geminiKey,
             uploadedDocs: files,
-            // 기준 정책이 있으면 그 정책의 서류·조건으로 검수
             ...(auditFor && { policy: auditFor.p }),
-          }),
-        });
-        const data = await res.json();
+          },
+          ac.signal
+        );
         await waitWhilePaused();
         if (stoppedRef.current) return;
         pendingMsgIdRef.current = null;
-        if (!res.ok || !data.auditResult) {
-          patch(id, { content: data.message || "서류 검수에 실패했습니다.", error: true });
+        if (!ok || !data.auditResult) {
+          patch(id, { content: String(data.message || "서류 검수에 실패했습니다."), error: true });
           setAgentActive(false);
           setAgentScanning(false);
           return;
         }
-        const result: AuditResult = data.auditResult;
+        const result = data.auditResult as AuditResult;
         const n = risksOf(result);
         if (auditFor) {
           setPolicyState((s) => ({ ...s, [auditFor.key]: { ...s[auditFor.key], audit: result } }));
         } else {
-          setUpload({ result, mode: data.mode, note: data.note });
+          setUpload({ result, mode: String(data.mode || "local_rules"), note: data.note ? String(data.note) : undefined });
           setAuditMode("upload");
         }
         setView("audit");
         setCanvasOpen(true);
         const engine = data.mode === "gemini" ? "Gemini 판독" : "규칙 엔진";
-        const skipped = data.skippedFiles?.length
-          ? `\n\n검수하지 못한 파일: ${data.skippedFiles.join(", ")} (이미지·PDF는 Gemini API 키 필요)`
+        const skippedList = Array.isArray(data.skippedFiles) ? data.skippedFiles : [];
+        const skipped = skippedList.length
+          ? `\n\n검수하지 못한 파일: ${skippedList.join(", ")} (이미지·PDF는 Gemini API 키 필요)`
           : "";
         patch(id, {
           content:
@@ -954,26 +1010,22 @@ export default function Page() {
         finishAgentWithTarget(
           n ? `반려 위험 ${n}건을 찾았습니다. 빨간 표시 영역을 확인하세요.` : "서류 검수 완료 — 반려 위험이 없습니다.",
           [
-            { selector: "audit-risk", label: n ? `반려 위험 ${n}건` : "검수 완료" },
-            ...(n ? [{ selector: "audit-findings", label: "보완할 항목" }] : []),
-            { selector: "audit-crosscheck", label: "서류 간 교차 검증" },
+            { tab: "audit", selector: "audit-risk", label: n ? `반려 위험 ${n}건` : "검수 완료" },
+            ...(n ? [{ tab: "audit" as View, selector: "audit-findings", label: "보완할 항목" }] : []),
+            { tab: "audit", selector: "audit-crosscheck", label: "서류 간 교차 검증" },
           ]
         );
         return;
       }
 
-      const res = await fetch("/api/agent/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: ac.signal,
-        body: JSON.stringify({
+      const { ok, data } = await callRunStream(
+        {
           action: "agent_chat",
           apiKey: geminiKey,
           publicDataApiKey: publicKey,
           userMessage: text,
           uploadedDocs: files,
           knownPolicies: (() => {
-            // 질문이나 최근 대화에 이름이 나온 정책만 보낸다
             const recent = (text + messages.slice(-4).map((m) => m.content).join(" ")).replace(/\s+/g, "");
             return Object.entries(facts)
               .filter(([k]) => recent.includes(k))
@@ -995,27 +1047,29 @@ export default function Page() {
                 sepMonths: Number(profile.sepMonths) || 0,
               }
             : undefined,
-        }),
-      });
-      const data = await res.json();
+        },
+        ac.signal
+      );
       await waitWhilePaused();
       if (stoppedRef.current) return;
       pendingMsgIdRef.current = null;
 
-      if (!res.ok || !data.reply) {
-        patch(id, { content: data.message || "답변을 만들지 못했습니다.", error: true });
+      if (!ok || !data.reply) {
+        patch(id, { content: String(data.message || "답변을 만들지 못했습니다."), error: true });
         setAgentActive(false);
         setAgentScanning(false);
         return;
       }
+      const replyText = String(data.reply);
+      const cardData = data.card as AnswerCard | undefined;
       const eligibility = data.kind === "eligibility";
       if (eligibility) {
         setView("triage");
         setCanvasOpen(true);
-      } else if (data.card) {
+      } else if (cardData) {
         setFocusId(id);
         setView("answer");
-        const ps: PolicyDetail[] = data.card.policies || [];
+        const ps: PolicyDetail[] = cardData.policies || [];
         if (ps.length) {
           setCtx(`${id}#0`);
           setFacts((f) => ({
@@ -1028,14 +1082,14 @@ export default function Page() {
       }
       patch(id, {
         content:
-          data.reply +
+          replyText +
           (data.needsKey
             ? "\n\n연결 설정에서 Gemini API 키를 넣으면 등록한 사이트를 검색해 질문 내용에 맞춰 답변합니다."
             : "") +
-          (data.card ? "" : relatedLinks(text, data.reply)),
-        traces: data.toolExecutions,
-        sources: data.sources,
-        card: data.card || undefined,
+          (cardData ? "" : relatedLinks(text, replyText)),
+        traces: data.toolExecutions as ToolExecution[] | undefined,
+        sources: data.sources as { title: string; url: string; registered?: boolean }[] | undefined,
+        card: cardData || undefined,
         ...(eligibility && {
           artifact: { view: "triage" as View, title: "자격 판정 결과", meta: "입력 조건 기준 계산" },
           followUps: ["recipe", "audit_defect"] as MissionKey[],
@@ -1043,14 +1097,14 @@ export default function Page() {
       });
       if (eligibility) {
         finishAgentWithTarget("자격 판정 결과를 패널에 정리했습니다.", [
-          { selector: "triage-verdict", label: "자격 판정 결과" },
-          { selector: "triage-rent", label: "환산 합산 월세" },
-          { selector: "triage-special", label: "독립가구 특례" },
+          { tab: "triage", selector: "triage-verdict", label: "자격 판정 결과" },
+          { tab: "triage", selector: "triage-rent", label: "환산 합산 월세" },
+          { tab: "triage", selector: "triage-special", label: "독립가구 특례" },
         ]);
-      } else if (data.card && window.innerWidth >= 1024) {
+      } else if (cardData && window.innerWidth >= 1024) {
         finishAgentWithTarget("답변 근거와 출처를 정리했습니다.", [
-          { selector: "answer-summary", label: "답변 핵심 근거" },
-          { selector: "answer-steps", label: "신청 체크리스트" },
+          { tab: "answer", selector: "answer-summary", label: "답변 핵심 근거" },
+          { tab: "answer", selector: "answer-steps", label: "신청 체크리스트" },
         ]);
       } else {
         finishAgentWithTarget("답변 정리를 완료했습니다.", null);
