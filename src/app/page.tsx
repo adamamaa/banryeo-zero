@@ -9,7 +9,6 @@ import {
   CircleAlert,
   Download,
   ExternalLink,
-  FileCheck2,
   FileText,
   LoaderCircle,
   PanelLeft,
@@ -1296,31 +1295,8 @@ export default function Page() {
                         style={{ animationDelay: `${420 + idx * 70}ms` }}
                         className="animate-fade-up hover-lift p-3.5 text-left bg-slate-50/70 hover:bg-white border border-slate-100 rounded-xl hover:border-purple-200 group disabled:opacity-50"
                       >
-                        <div className="mb-2 flex items-center justify-between text-slate-600 group-hover:text-purple-600 transition-colors">
-                          {idx === 0 && (
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-                              <path d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" strokeLinecap="round" strokeLinejoin="round" />
-                              <path d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          )}
-                          {idx === 1 && (
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-                              <path
-                                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          )}
-                          {idx === 2 && (
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-                              <path d="M19 11l-8 8-4-4M19 5l-8 8-4-4" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          )}
-                          {idx === 3 && (
-                            <FileCheck2 className="w-4 h-4" />
-                          )}
-                          <span className="tnum text-[10px] font-semibold text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">
+                        <div className="mb-2">
+                          <span className="tnum inline-block text-[10px] font-semibold text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">
                             STEP {MISSIONS[k].no}
                           </span>
                         </div>
