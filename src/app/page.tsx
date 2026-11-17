@@ -25,11 +25,20 @@ import type { ToolExecution, ToolSource } from "@/lib/tools";
 import type { AuditResult } from "@/lib/docRules";
 import type { AnswerCard, PolicyDetail } from "@/lib/card";
 import { AgentOverlay, AgentPlanCard, type AgentPlanStep, type AgentTarget } from "@/components/AgentOverlay";
+import { InfoOnboarding, InfoTags, firstMissing, type InfoKey, type InfoValue, type InfoValues } from "@/components/InfoOnboarding";
+import { AfterCare, BenefitCombo, DocCalendar, NearMissCard } from "@/components/Insights";
+import { SidebarRecs } from "@/components/SidebarRecs";
+import { nearMiss } from "@/lib/nearMiss";
+import type { BenefitCtx } from "@/lib/benefits";
 
 const policy = POLICY_SCENARIOS[0];
 const form = policy.applicationFormTemplate;
 
-type View = "answer" | "tools" | "triage" | "recipe" | "audit" | "package";
+// 패널 탭: 받을 돈(combo) → 서류 준비(recipe) → 제출(audit: 사전 검수 + 신청 패키지)
+type View = "answer" | "combo" | "recipe" | "audit";
+const PANEL_VIEWS: View[] = ["answer", "combo", "recipe", "audit"];
+// 예전 대화에 저장된 탭: 신청 패키지는 제출로, 실행 내역·자격 판정은 받을 돈으로 연다
+const toView = (v: string): View => (v === "package" ? "audit" : PANEL_VIEWS.includes(v as View) ? (v as View) : "combo");
 type MissionKey = "all" | "triage" | "recipe" | "audit_defect" | "audit_fixed";
 type AuditMode = "defect" | "fixed" | "upload";
 type Verdict = "eligible" | "needs_parent_check" | "ineligible";
@@ -77,6 +86,34 @@ const toProfile = (p: ProfileInput): Profile => ({
 });
 
 const hasProfileInput = (p: ProfileInput) => Object.values(p).some((v) => v !== "");
+
+// 계산에 쓰지 않는 내 정보 (AI 답변 맞춤용)
+interface ExtraInfo {
+  sido: string;
+  sigungu: string;
+  job: string;
+}
+const EMPTY_EXTRA: ExtraInfo = { sido: "", sigungu: "", job: "" };
+const PROFILE_KEYS: (keyof Profile)[] = ["age", "incomeManwon", "depositManwon", "rentManwon", "sepMonths"];
+const isProfileKey = (k: InfoKey): k is keyof Profile => (PROFILE_KEYS as string[]).includes(k);
+
+// 첫 방문 질문으로 저장한 내 정보 (브라우저에만 저장)
+const loadSavedInfo = () => {
+  const saved = loadLocal<{ profile?: Partial<ProfileInput>; extra?: Partial<ExtraInfo> } | null>("gonggopass_profile", null);
+  const profile = { ...EMPTY_PROFILE };
+  for (const k of PROFILE_KEYS) {
+    const v = saved?.profile?.[k];
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) profile[k] = v;
+  }
+  return {
+    profile,
+    extra: {
+      sido: typeof saved?.extra?.sido === "string" ? saved.extra.sido.slice(0, 20) : "",
+      sigungu: typeof saved?.extra?.sigungu === "string" ? saved.extra.sigungu.slice(0, 20) : "",
+      job: typeof saved?.extra?.job === "string" ? saved.extra.job.slice(0, 20) : "",
+    },
+  };
+};
 
 interface Message {
   id: string;
@@ -150,11 +187,9 @@ function loadLocal<T>(key: string, fallback: T): T {
 }
 
 const VIEWS: { id: View; label: string }[] = [
-  { id: "tools", label: "실행 내역" },
-  { id: "triage", label: "자격 판정" },
-  { id: "recipe", label: "발급 가이드" },
-  { id: "audit", label: "사전 검수" },
-  { id: "package", label: "신청 패키지" },
+  { id: "combo", label: "받을 돈" },
+  { id: "recipe", label: "서류 준비" },
+  { id: "audit", label: "제출" },
 ];
 
 const SOURCE: Record<ToolSource, { label: string; cls: string; hint: string }> = {
@@ -179,11 +214,11 @@ const MISSIONS: Record<
   MissionKey,
   { no: string; label: string; sub: string; steps: number[]; view: View; mode?: "defect" | "fixed" }
 > = {
-  triage: { no: "1", label: "자격 판정", sub: "소득·월세 요건과 특례 조항 확인", steps: [1, 2, 3, 4, 5], view: "triage" },
+  triage: { no: "1", label: "자격 판정", sub: "소득·월세 요건과 특례 조항 확인", steps: [1, 2, 3, 4, 5], view: "combo" },
   recipe: { no: "2", label: "발급 가이드", sub: "필요한 서류와 발급 옵션", steps: [6], view: "recipe" },
   audit_defect: { no: "3", label: "사전 검수", sub: "예시 서류 세트 A (미비)", steps: [7, 8], view: "audit", mode: "defect" },
-  audit_fixed: { no: "4", label: "재검수 · 신청 패키지", sub: "예시 서류 세트 B (보완)", steps: [8, 9], view: "package", mode: "fixed" },
-  all: { no: "", label: "전체 흐름 실행", sub: "1~4단계 연속 실행", steps: [1, 2, 3, 4, 5, 6, 7, 8, 9], view: "tools" },
+  audit_fixed: { no: "4", label: "재검수 · 신청 패키지", sub: "예시 서류 세트 B (보완)", steps: [8, 9], view: "audit", mode: "fixed" },
+  all: { no: "", label: "전체 흐름 실행", sub: "1~4단계 연속 실행", steps: [1, 2, 3, 4, 5, 6, 7, 8, 9], view: "combo" },
 };
 
 const VERDICT: Record<Verdict, { title: string; body: string; cls: string }> = {
@@ -213,7 +248,7 @@ const risksOf = (a: { findings: { severity: string }[] }) =>
 export default function Page() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [canvasOpen, setCanvasOpen] = useState(false);
-  const [view, setView] = useState<View>("tools");
+  const [view, setView] = useState<View>("combo");
 
   const [geminiKey, setGeminiKey] = useState("");
   const [publicKey, setPublicKey] = useState("");
@@ -235,13 +270,19 @@ export default function Page() {
   const [siteError, setSiteError] = useState("");
   const [maskOnScreen, setMaskOnScreen] = useState(true);
   const [sidebarSearch, setSidebarSearch] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const [profile, setProfile] = useState<ProfileInput>(EMPTY_PROFILE);
+  const [extra, setExtra] = useState<ExtraInfo>(EMPTY_EXTRA);
+  // 내 정보 질문 카드: 첫 방문이면 자동으로 열리고, 태그를 누르면 그 항목만 고친다
+  const [onboard, setOnboard] = useState<{ startKey?: InfoKey; single: boolean } | null>(null);
   const [tools, setTools] = useState<ToolExecution[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [toolsLoading, setToolsLoading] = useState(false);
 
   const [auditMode, setAuditMode] = useState<AuditMode>("defect");
+  // 시연 실행으로 예시 서류 세트를 연 적이 있는지 (없으면 검수·패키지 탭은 비워 둔다)
+  const [demoAudit, setDemoAudit] = useState(false);
   const [upload, setUpload] = useState<{ result: AuditResult; mode: string; note?: string } | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [clauseId, setClauseId] = useState("clause-special");
@@ -305,6 +346,43 @@ export default function Page() {
   const panelHasData =
     messages.length > 0 || tools.length > 0 || summary !== null || upload !== null || hasProfileInput(profile);
 
+  const info: InfoValues = { ...profile, sido: extra.sido, sigungu: extra.sigungu, job: extra.job };
+  // 패널은 사용자가 넣은 정보·서류가 있을 때만 채운다
+  const hasAnyInfo = Object.values(info).some((v) => v !== "");
+  const hasAudit = demoAudit || upload !== null;
+  const startInfo = () => setOnboard({ startKey: firstMissing(info), single: false });
+  const numOrNull = (v: number | "") => (v === "" ? null : v);
+  const benefitCtx: BenefitCtx = {
+    sido: extra.sido,
+    job: extra.job,
+    age: numOrNull(profile.age),
+    incomeManwon: numOrNull(profile.incomeManwon),
+    sepMonths: numOrNull(profile.sepMonths),
+    depositManwon: numOrNull(profile.depositManwon),
+    rentManwon: numOrNull(profile.rentManwon),
+  };
+  // 내 정보 한 항목을 바꾸고 브라우저에 저장한다 (시연 실행이 채운 값은 저장하지 않음)
+  const setInfo = (key: InfoKey, value: InfoValue) => {
+    const nextProfile = isProfileKey(key)
+      ? { ...profile, [key]: value === "" ? "" : Math.max(0, Number(value) || 0) }
+      : profile;
+    const nextExtra = isProfileKey(key)
+      ? extra
+      : {
+          ...extra,
+          [key]: String(value),
+          // 시도가 바뀌면 이전 시군구는 버린다
+          ...(key === "sido" && value !== extra.sido ? { sigungu: "" } : {}),
+        };
+    setProfile(nextProfile);
+    setExtra(nextExtra);
+    localStorage.setItem("gonggopass_profile", JSON.stringify({ profile: nextProfile, extra: nextExtra }));
+  };
+  const closeOnboard = () => {
+    if (onboard && !onboard.single) localStorage.setItem("gonggopass_onboarded", "1");
+    setOnboard(null);
+  };
+
   const newChat = () => {
     if (working) return;
     setMessages([]);
@@ -312,13 +390,14 @@ export default function Page() {
     setTools([]);
     setSummary(null);
     setUpload(null);
-    setProfile(EMPTY_PROFILE);
+    setDemoAudit(false);
+    setProfile(loadSavedInfo().profile);
     setFocusId(null);
     setCtx("demo");
     setAnswers({});
     setDoneDocs({});
     setMarkedTargets({});
-    setView("tools");
+    setView("combo");
   };
   const openChat = (id: string) => {
     const c = chats.find((x) => x.id === id);
@@ -422,6 +501,10 @@ export default function Page() {
       setCustom(safe);
       setAddedIds(saved.added || DEFAULT_TOOLS);
     }
+    const savedInfo = loadSavedInfo();
+    setProfile(savedInfo.profile);
+    setExtra(savedInfo.extra);
+    if (!localStorage.getItem("gonggopass_onboarded")) setOnboard({ single: false });
     setPolicyState(loadLocal<Record<string, PolicyState>>("gonggopass_policy_state", {}));
     // 30일 지난 정책 정보는 버린다 (정책이 바뀌었을 수 있음)
     const month = Date.now() - 30 * 24 * 3600 * 1000;
@@ -435,6 +518,12 @@ export default function Page() {
     setLoaded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 내 정보 입력을 마치면(또는 저장된 정보로 들어오면) 자격 계산을 바로 돌려 판정 탭을 채운다
+  useEffect(() => {
+    if (loaded && !onboard && !working && hasProfileInput(profile)) fetchTools();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboard, loaded]);
 
   useEffect(() => {
     if (loaded) localStorage.setItem("gonggopass_policy_state", JSON.stringify(policyState));
@@ -504,7 +593,9 @@ export default function Page() {
 
   const missionCopy = (key: MissionKey, s: Summary, p: Profile) => {
     const calc = `보증금 환산 ${won(s.convertedDepositKRW)} + 월세 ${won(p.rentManwon * 10000)} = **${won(s.totalConvertedRentKRW)}** (상한 900,000원)`;
-    const triage = `**${VERDICT[s.verdict].title}.** ${VERDICT[s.verdict].body}\n\n- 본인 소득: 1인가구 기준 중위소득의 **${s.medianRatioPercent}%** (요건 60% 이하, 특례 50% 이상)\n- 월세: ${calc}\n- 근거 조항: 3p 제2조 단서, 18p [별표2] 제3호\n- 건축물대장 용도 확인은 예시 데이터입니다.`;
+    const nm = nearMiss(p);
+    const nmTop = nm.items.find((i) => i.kind !== "margin");
+    const triage = `**${VERDICT[s.verdict].title}.** ${VERDICT[s.verdict].body}\n\n- 본인 소득: 1인가구 기준 중위소득의 **${s.medianRatioPercent}%** (요건 60% 이하, 특례 50% 이상)\n- 월세: ${calc}\n- 근거 조항: 3p 제2조 단서, 18p [별표2] 제3호\n- 건축물대장 용도 확인은 예시 데이터입니다.\n\n**한 끗 차이:** ${nm.headline}${nmTop ? ` — ${nmTop.title}` : ""}`;
     const defect = policy.auditScenarios.defect.findings;
     return {
       triage: {
@@ -515,25 +606,25 @@ export default function Page() {
       },
       recipe: {
         user: "제 조건에서 어떤 서류를 어떤 옵션으로 발급받아야 하는지 알려 주세요.",
-        reply: `공고문에 나열된 서류 ${policy.allDocumentsCount}종 가운데 이 조건에서 준비할 서류는 **${requiredDocs.length}종**입니다.\n\n- 주민등록등본: 전입일과 최근 5년 주소변동을 **포함**으로 발급\n- 가족관계증명서: 일반이 아닌 **상세** 증명서\n- 임대차계약서: 확정일자가 없으면 **신고필증** 추가\n\n서류별 발급 화면 링크와 선택 옵션은 발급 가이드 탭에 정리했습니다.`,
+        reply: `공고문에 나열된 서류 ${policy.allDocumentsCount}종 가운데 이 조건에서 준비할 서류는 **${requiredDocs.length}종**입니다.\n\n- 주민등록등본: 전입일과 최근 5년 주소변동을 **포함**으로 발급\n- 가족관계증명서: 일반이 아닌 **상세** 증명서\n- 임대차계약서: 확정일자가 없으면 **신고필증** 추가\n\n서류별 발급 화면 링크와 선택 옵션은 서류 준비 탭에 정리했습니다.`,
         title: "서류 발급 가이드",
         meta: `필수 ${requiredDocs.length}종 · 발급처 링크 포함`,
       },
       audit_defect: {
         user: "등본, 임대차계약서, 가족관계증명서를 준비했습니다. 제출 전에 문제 없는지 봐 주세요.",
-        reply: `예시 서류 세트 A를 점검한 결과 **반려 위험 ${defect.length}건**을 찾았습니다.\n\n${defect.map((f, i) => `${i + 1}. ${f.title.replace(/^\[[^\]]+\]\s*/, "")}`).join("\n")}\n\n항목별 근거 조항과 보완 방법은 사전 검수 탭에 있습니다.`,
+        reply: `예시 서류 세트 A를 점검한 결과 **반려 위험 ${defect.length}건**을 찾았습니다.\n\n${defect.map((f, i) => `${i + 1}. ${f.title.replace(/^\[[^\]]+\]\s*/, "")}`).join("\n")}\n\n항목별 근거 조항과 보완 방법은 제출 탭에 있습니다.`,
         title: "사전 검수 리포트",
         meta: `반려 위험 ${defect.length}건`,
       },
       audit_fixed: {
         user: "지적된 항목을 모두 보완해서 다시 올렸습니다. 재검수하고 신청서를 채워 주세요.",
-        reply: `예시 서류 세트 B를 다시 점검했고 **감지된 반려 위험이 없습니다.**\n\n- 신청서 ${form.autoFilledFields.length}개 항목을 서류 값으로 채웠습니다.\n- 계획서 초안: 금칙어 ${forbiddenHit.length}건, 권장 키워드 ${keywordHit.length}/${form.recommendedKeywords.length}개 포함\n\n신청 패키지 탭에서 내용을 확인하고 내려받을 수 있습니다.`,
+        reply: `예시 서류 세트 B를 다시 점검했고 **감지된 반려 위험이 없습니다.**\n\n- 신청서 ${form.autoFilledFields.length}개 항목을 서류 값으로 채웠습니다.\n- 계획서 초안: 금칙어 ${forbiddenHit.length}건, 권장 키워드 ${keywordHit.length}/${form.recommendedKeywords.length}개 포함\n\n제출 탭에서 내용을 확인하고 내려받을 수 있습니다.`,
         title: "신청 패키지",
         meta: "신청서 자동 기입 · 계획서 초안",
       },
       all: {
         user: "자격 확인부터 서류 검수, 신청서 작성까지 전체 흐름을 한 번에 실행해 주세요.",
-        reply: `${triage}\n\n이어서 서류 선별, 예시 서류 세트 A 검수(**반려 위험 ${defect.length}건**), 신청서 점검까지 실행했습니다. 실행 내역 탭에서 도구별 입력과 결과, 데이터 출처를 확인할 수 있습니다.`,
+        reply: `${triage}\n\n이어서 서류 선별, 예시 서류 세트 A 검수(**반려 위험 ${defect.length}건**), 신청서 점검까지 실행했습니다. 채팅의 도구 실행 내역에서 도구별 입력과 결과, 데이터 출처를 확인할 수 있습니다.`,
         title: "전체 실행 내역",
         meta: "도구 9개 실행",
       },
@@ -637,11 +728,9 @@ export default function Page() {
 
     const tabLabelMap: Record<View, string> = {
       answer: "답변 근거",
-      tools: "실행 내역",
-      triage: "자격 판정",
-      recipe: "발급 가이드",
-      audit: "사전 검수",
-      package: "신청 패키지",
+      combo: "받을 돈",
+      recipe: "서류 준비",
+      audit: "제출",
     };
 
     (async () => {
@@ -693,6 +782,7 @@ export default function Page() {
     const m = MISSIONS[key];
     setCtx("demo");
     if (m.mode) setAuditMode(m.mode);
+    if (m.mode || key === "all") setDemoAudit(true);
     const activeProfile = hasProfileInput(profile) ? toProfile(profile) : DEMO_PROFILE;
     if (!hasProfileInput(profile)) setProfile(DEMO_PROFILE);
     const s0 = summary;
@@ -720,9 +810,8 @@ export default function Page() {
         ],
         scan: false,
         targets: [
-          { tab: "triage", selector: "triage-verdict", label: "핵심 자격 판정" },
-          { tab: "triage", selector: "triage-rent", label: "환산 합산 월세" },
-          { tab: "triage", selector: "triage-special", label: "독립가구 특례 적용" },
+          { tab: "combo", selector: "triage-nearmiss", label: "한 끗 차이 진단" },
+          { tab: "combo", selector: "combo-total", label: "받을 돈 최대 조합" },
         ],
       },
       recipe: {
@@ -736,6 +825,7 @@ export default function Page() {
         targets: [
           { tab: "recipe", selector: "recipe-docs", label: "필수 발급 서류" },
           { tab: "recipe", selector: "recipe-exempt", label: "면제 서류 확인" },
+          { tab: "recipe", selector: "recipe-timeline", label: "발급일 역산 캘린더" },
         ],
       },
       audit_defect: {
@@ -761,9 +851,10 @@ export default function Page() {
         ],
         scan: true,
         targets: [
-          { tab: "package", selector: "package-form", label: "신청서 자동 기입" },
-          { tab: "package", selector: "package-essay", label: "계획서 금칙어 점검" },
-          { tab: "package", selector: "package-files", label: "제출 파일명 규격" },
+          { tab: "audit", selector: "package-form", label: "신청서 자동 기입" },
+          { tab: "audit", selector: "package-essay", label: "계획서 금칙어 점검" },
+          { tab: "audit", selector: "package-files", label: "제출 파일명 규격" },
+          { tab: "audit", selector: "package-aftercare", label: "받은 뒤 환수 방어" },
         ],
       },
       all: {
@@ -776,11 +867,10 @@ export default function Page() {
         ],
         scan: true,
         targets: [
-          { tab: "tools", selector: "tools-list", label: "9개 도구 실행 내역" },
-          { tab: "triage", selector: "triage-verdict", label: "핵심 자격 판정" },
+          { tab: "combo", selector: "combo-total", label: "받을 돈 최대 조합" },
           { tab: "recipe", selector: "recipe-docs", label: "필수 발급 서류" },
           { tab: "audit", selector: "audit-risk", label: "반려 위험 적발" },
-          { tab: "package", selector: "package-form", label: "신청서 자동 기입" },
+          { tab: "audit", selector: "package-form", label: "신청서 자동 기입" },
         ],
       },
     };
@@ -1038,15 +1128,20 @@ export default function Page() {
             .slice(-8)
             .map(({ role, content }) => ({ role, content })),
           sites: myTools.map(({ name, url }) => ({ name, url })),
-          userProfile: hasProfileInput(profile)
-            ? {
-                age: Number(profile.age) || 0,
-                income: Number(profile.incomeManwon) || 0,
-                deposit: Number(profile.depositManwon) || 0,
-                rent: Number(profile.rentManwon) || 0,
-                sepMonths: Number(profile.sepMonths) || 0,
-              }
-            : undefined,
+          // 입력하지 않은 항목은 보내지 않는다 (서버가 시연 기본값을 쓴다). 0은 0으로 보낸다.
+          userProfile:
+            hasProfileInput(profile) || extra.sido || extra.job
+              ? {
+                  sigungu: extra.sigungu || undefined,
+                  age: profile.age === "" ? undefined : profile.age,
+                  income: profile.incomeManwon === "" ? undefined : profile.incomeManwon,
+                  deposit: profile.depositManwon === "" ? undefined : profile.depositManwon,
+                  rent: profile.rentManwon === "" ? undefined : profile.rentManwon,
+                  sepMonths: profile.sepMonths === "" ? undefined : profile.sepMonths,
+                  sido: extra.sido || undefined,
+                  job: extra.job || undefined,
+                }
+              : undefined,
         },
         ac.signal
       );
@@ -1064,7 +1159,10 @@ export default function Page() {
       const cardData = data.card as AnswerCard | undefined;
       const eligibility = data.kind === "eligibility";
       if (eligibility) {
-        setView("triage");
+        // 채팅으로 계산한 결과도 패널(자격 판정·한 끗 차이)에 반영한다
+        if (data.summary) setSummary(data.summary as Summary);
+        setCtx("demo");
+        setView("combo");
         setCanvasOpen(true);
       } else if (cardData) {
         setFocusId(id);
@@ -1091,14 +1189,14 @@ export default function Page() {
         sources: data.sources as { title: string; url: string; registered?: boolean }[] | undefined,
         card: cardData || undefined,
         ...(eligibility && {
-          artifact: { view: "triage" as View, title: "자격 판정 결과", meta: "입력 조건 기준 계산" },
+          artifact: { view: "combo" as View, title: "자격 판정 결과", meta: "입력 조건 기준 계산" },
           followUps: ["recipe", "audit_defect"] as MissionKey[],
         }),
       });
       if (eligibility) {
         finishAgentWithTarget("자격 판정과 발급 서류를 탭별로 정리했습니다.", [
-          { tab: "triage", selector: "triage-verdict", label: "자격 판정 결과" },
-          { tab: "triage", selector: "triage-rent", label: "환산 합산 월세" },
+          { tab: "combo", selector: "triage-nearmiss", label: "한 끗 차이 진단" },
+          { tab: "combo", selector: "combo-total", label: "받을 돈 최대 조합" },
           { tab: "recipe", selector: "recipe-docs", label: "필수 발급 서류" },
         ]);
       } else if (cardData && window.innerWidth >= 1024) {
@@ -1108,7 +1206,6 @@ export default function Page() {
           ...(cardData.steps?.length ? [{ tab: "answer" as View, selector: "answer-steps", label: "신청 체크리스트" }] : []),
           ...(hasPolicies
             ? [
-                { tab: "triage" as View, selector: "triage-verdict", label: "자격 조건 확인" },
                 { tab: "recipe" as View, selector: "recipe-docs", label: "필요 서류 목록" },
               ]
             : []),
@@ -1161,15 +1258,36 @@ export default function Page() {
   const filteredChats = sidebarSearch.trim()
     ? chats.filter((c) => c.title.toLowerCase().includes(sidebarSearch.trim().toLowerCase()))
     : chats;
-  const filteredTools = sidebarSearch.trim()
-    ? myTools.filter((t) => t.name.toLowerCase().includes(sidebarSearch.trim().toLowerCase()))
-    : myTools;
+  // 히스토리는 최근 3개만 보이고 나머지는 '더보기'로 (검색 중엔 전부)
+  const HISTORY_PREVIEW = 3;
+  const visibleChats =
+    historyOpen || sidebarSearch.trim() ? filteredChats : filteredChats.slice(0, HISTORY_PREVIEW);
+
+  const infoCard = onboard ? (
+    <InfoOnboarding
+      key={`${onboard.startKey || "start"}-${onboard.single}`}
+      values={info}
+      onSet={setInfo}
+      onClose={closeOnboard}
+      startKey={onboard.startKey}
+      single={onboard.single}
+    />
+  ) : null;
 
   const promptCard = (
     <form
       onSubmit={send}
       className="w-full bg-white border border-slate-200/90 rounded-2xl shadow-input p-3 transition-shadow focus-within:ring-2 focus-within:ring-purple-200 focus-within:border-purple-300"
     >
+      {!onboard && (
+        <div className="pb-2">
+          <InfoTags
+            values={info}
+            onEdit={(k) => setOnboard({ startKey: k, single: true })}
+            onStart={() => setOnboard({ startKey: firstMissing(info), single: false })}
+          />
+        </div>
+      )}
       {staged.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pb-2">
           {staged.map((f, i) => (
@@ -1197,18 +1315,6 @@ export default function Page() {
       />
       <div className="flex items-center justify-between pt-2 border-t border-slate-100">
         <div className="flex items-center space-x-2">
-          <button
-            type="button"
-            onClick={() => runMission("all")}
-            disabled={working}
-            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full border border-purple-300 bg-purple-50/50 hover:bg-purple-100 text-purple-700 text-xs font-medium transition-colors disabled:opacity-50"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M12 21a9 9 0 100-18 9 9 0 000 18z" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M12 8v8m-4-4h8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>전체 점검 실행</span>
-          </button>
           <label
             aria-label="서류 첨부"
             title="서류 첨부"
@@ -1226,27 +1332,6 @@ export default function Page() {
         >
           {working ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : <ArrowUp className="w-3.5 h-3.5" />}
         </button>
-      </div>
-      <div className="flex flex-wrap items-center gap-2 pt-2.5 mt-1 border-t border-slate-50 text-[11px] text-slate-500">
-        <span className="inline-flex items-center space-x-1 text-slate-600 font-medium">
-          <span className="text-purple-500">✦</span>
-          <span>추천 질문</span>
-        </span>
-        {[
-          "월세가 70만 원을 넘어도 받을 수 있나요?",
-          "주민등록등본은 어떻게 발급하나요?",
-          "국민취업지원제도 신청 자격은?",
-        ].map((q) => (
-          <button
-            key={q}
-            type="button"
-            onClick={() => send(undefined, q)}
-            disabled={working}
-            className="rounded-full bg-purple-50/70 hover:bg-purple-100/80 text-purple-700 px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50"
-          >
-            {q}
-          </button>
-        ))}
       </div>
     </form>
   );
@@ -1316,7 +1401,7 @@ export default function Page() {
                   value={sidebarSearch}
                   onChange={(e) => setSidebarSearch(e.target.value)}
                   className="w-full text-xs pl-8 pr-8 py-2 bg-slate-100/80 hover:bg-slate-100 focus:bg-white border border-transparent focus:border-slate-300 rounded-xl focus:outline-none transition-colors placeholder:text-slate-400 text-slate-700"
-                  placeholder="대화 · 도구 검색"
+                  placeholder="공고 · 대화 검색"
                   type="text"
                 />
                 <div className="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none">
@@ -1328,6 +1413,14 @@ export default function Page() {
             </div>
 
             <div className="flex-1 overflow-y-auto no-scrollbar pt-4 text-xs space-y-4 pr-1">
+              <SidebarRecs
+                ctx={benefitCtx}
+                hasInfo={hasAnyInfo}
+                onStartInfo={startInfo}
+                onAsk={(q) => send(undefined, q)}
+                busy={working}
+                search={sidebarSearch.trim().toLowerCase()}
+              />
               <div>
                 <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block px-2.5 mb-1.5">
                   히스토리
@@ -1338,7 +1431,7 @@ export default function Page() {
                   </p>
                 ) : (
                   <div className="space-y-0.5">
-                    {filteredChats.map((c) => (
+                    {visibleChats.map((c) => (
                       <div key={c.id} className="group relative">
                         <button
                           onClick={() => openChat(c.id)}
@@ -1360,35 +1453,19 @@ export default function Page() {
                         </button>
                       </div>
                     ))}
+                    {!sidebarSearch.trim() && filteredChats.length > HISTORY_PREVIEW && (
+                      <button
+                        type="button"
+                        onClick={() => setHistoryOpen((v) => !v)}
+                        aria-expanded={historyOpen}
+                        className="flex w-full items-center gap-1 px-2.5 py-1 text-[11px] text-slate-400 hover:text-slate-700"
+                      >
+                        <ChevronDown className={`h-3 w-3 transition-transform ${historyOpen ? "rotate-180" : ""}`} />
+                        {historyOpen ? "접기" : `더보기 (${filteredChats.length - HISTORY_PREVIEW})`}
+                      </button>
+                    )}
                   </div>
                 )}
-              </div>
-
-              <div>
-                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block px-2.5 mb-1.5">
-                  내 도구 · 정부 사이트
-                </span>
-                <div className="space-y-0.5">
-                  {filteredTools.map((t) => (
-                    <a
-                      key={t.id}
-                      href={t.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="group flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors"
-                    >
-                      <span className="truncate">{t.name}</span>
-                      <ExternalLink className="h-3 w-3 shrink-0 text-slate-300 group-hover:text-purple-600" />
-                    </a>
-                  ))}
-                  <button
-                    onClick={() => setShowTools(true)}
-                    className="mt-1 flex w-full items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-purple-700 hover:bg-purple-50 font-medium transition-colors"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    <span>도구 추가 · 관리</span>
-                  </button>
-                </div>
               </div>
             </div>
 
@@ -1478,7 +1555,10 @@ export default function Page() {
                     </p>
                   </div>
 
-                  <div className="animate-fade-up delay-5 w-full mb-5">{promptCard}</div>
+                  <div className="animate-fade-up delay-5 w-full mb-5 space-y-3">
+                    {infoCard}
+                    {promptCard}
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full">
                     {(["triage", "recipe", "audit_defect", "audit_fixed"] as MissionKey[]).map((k, idx) => (
@@ -1529,7 +1609,7 @@ export default function Page() {
                           <div className="space-y-3">
                             <div className="flex items-center gap-2.5 text-sm text-slate-500">
                               <LiquidOrb size="sm" />
-                              <span>찾아보고 정리하는 중 · 보통 20초 안팎</span>
+                              <span>찾아보고 정리하는 중</span>
                             </div>
                             {agentActive && (
                               <AgentPlanCard
@@ -1632,7 +1712,7 @@ export default function Page() {
                             {msg.artifact && (
                               <button
                                 onClick={() => {
-                                  setView(msg.artifact!.view);
+                                  setView(toView(msg.artifact!.view));
                                   setCanvasOpen(true);
                                 }}
                                 className="group flex w-full items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5 text-left transition-colors hover:border-purple-300 hover:bg-purple-50/40"
@@ -1675,7 +1755,10 @@ export default function Page() {
           </div>
 
           {messages.length > 0 && (
-            <div className="shrink-0 px-6 md:px-8 pb-3 max-w-3xl mx-auto w-full">{promptCard}</div>
+            <div className="shrink-0 px-6 md:px-8 pb-3 max-w-3xl mx-auto w-full space-y-3">
+              {infoCard}
+              {promptCard}
+            </div>
           )}
 
           <footer className="h-10 px-6 shrink-0 flex items-center justify-center border-t border-transparent text-[11px] text-slate-400">
@@ -1739,23 +1822,15 @@ export default function Page() {
               </label>
             )}
 
-            {active && view === "tools" && (
-              <Card>
-                <CardHead title={`도구 실행 ${linkedMsg?.traces?.length || 0}건`} desc={`'${active.p.name}' 답변을 만들 때 실행한 도구`} />
-                {linkedMsg?.traces?.length ? <ToolList tools={linkedMsg.traces} /> : <Empty text="실행한 도구가 없습니다." />}
-              </Card>
-            )}
-            {active && view === "triage" && (
-              <PolicyTriage p={active.p} st={pst} onChange={setPst} onAsk={(q) => send(undefined, q)} busy={working} />
-            )}
             {active && view === "recipe" && (
               <PolicyDocs p={active.p} st={pst} onChange={setPst} sites={myTools} onAsk={(q) => send(undefined, q)} busy={working} />
             )}
+            {/* 제출 = 서류 검수 + 신청 패키지 */}
             {active && view === "audit" && (
-              <PolicyAudit p={active.p} st={pst} onUpload={uploadForPolicy} busy={working} display={display} />
-            )}
-            {active && view === "package" && (
-              <PolicyPackage p={active.p} st={pst} steps={active.steps} links={active.links} />
+              <>
+                <PolicyAudit p={active.p} st={pst} onUpload={uploadForPolicy} busy={working} display={display} />
+                <PolicyPackage p={active.p} st={pst} steps={active.steps} links={active.links} />
+              </>
             )}
             {/* 답변 근거: 채팅에서 고른 답변의 도구·출처·체크리스트 */}
             {view === "answer" &&
@@ -1774,204 +1849,27 @@ export default function Page() {
                 </Card>
               ))}
 
-            {/* 실행 내역 */}
-            {view === "tools" && !active && (
-              <>
-                <Card target="tools-input">
-                  <CardHead
-                    title="입력 조건"
-                    desc="값을 바꾸고 다시 계산하면 판정과 도구 결과가 갱신됩니다."
-                    action={
-                      <button
-                        onClick={() => fetchTools()}
-                        disabled={toolsLoading || !hasProfileInput(profile)}
-                        className="flex items-center gap-1.5 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-700 active:translate-y-px disabled:opacity-60"
-                      >
-                        <RefreshCw className={`h-3.5 w-3.5 ${toolsLoading ? "animate-spin" : ""}`} />
-                        다시 계산
-                      </button>
-                    }
-                  />
-                  <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-5">
-                    {(
-                      [
-                        ["age", "만 나이", "세"],
-                        ["incomeManwon", "월 소득", "만 원"],
-                        ["depositManwon", "보증금", "만 원"],
-                        ["rentManwon", "월세", "만 원"],
-                        ["sepMonths", "별도 거주", "개월"],
-                      ] as [keyof Profile, string, string][]
-                    ).map(([k, label, unit]) => (
-                      <label key={k} className="block">
-                        <span className="text-xs text-slate-500">{label}</span>
-                        <span className="mt-1 flex items-center rounded-lg border border-slate-200 bg-white transition-shadow hover:border-purple-200 focus-within:border-purple-300 focus-within:ring-2 focus-within:ring-purple-200">
-                          <input
-                            type="number"
-                            min={0}
-                            value={profile[k]}
-                            placeholder="입력"
-                            onChange={(e) => {
-                              const raw = e.target.value;
-                              setProfile((p) => ({ ...p, [k]: raw === "" ? "" : Math.max(0, Number(raw)) }));
-                            }}
-                            className="tnum w-full min-w-0 bg-transparent px-2 py-1.5 text-sm placeholder:text-slate-300 focus:outline-none"
-                          />
-                          <span className="shrink-0 pr-2 text-xs text-slate-400">{unit}</span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </Card>
-
-                <Card target="tools-list">
-                  <CardHead
-                    title={`도구 실행 ${tools.length}건`}
-                    desc={`실계산 ${tools.filter((t) => t.source === "calc").length} · 예시 데이터 ${tools.filter((t) => t.source === "sample").length} · 실시간 API ${tools.filter((t) => t.source === "live").length}`}
-                  />
-                  {tools.length === 0 ? (
-                    <Empty text={toolsLoading ? "도구를 실행하는 중입니다" : "아직 실행된 내역이 없습니다. 위 조건을 입력하고 다시 계산을 누르거나 시연을 실행하세요."} />
-                  ) : (
-                    <ToolList tools={tools} />
-                  )}
-                </Card>
-              </>
+            {/* 받을 돈 조합: 내 정보 기준이라 기준 정책과 무관하게 보여준다 */}
+            {view === "combo" && !hasAnyInfo && (
+              <EmptyCta text="내 정보를 입력하면 받을 수 있는 지원과 최대 조합을 계산해 드려요." action="내 정보 입력하기" onClick={startInfo} />
+            )}
+            {/* 한 끗 차이 진단 (자격 판정 탭에서 옮겨 옴) */}
+            {view === "combo" && hasProfileInput(profile) && <NearMissCard profile={toProfile(profile)} />}
+            {view === "combo" && hasAnyInfo && (
+              <BenefitCombo
+                ctx={benefitCtx}
+                sigungu={extra.sigungu}
+                onNeed={(k) => setOnboard({ startKey: k, single: true })}
+                onAsk={(q) => send(undefined, q)}
+                busy={working}
+              />
             )}
 
-            {/* 자격 판정 */}
-            {view === "triage" && !active && (
-              <>
-                {summary ? (
-                  <>
-                    <div
-                      data-agent-target="triage-verdict"
-                      className={`rounded-2xl border px-4 py-3.5 shadow-sm ${VERDICT[summary.verdict].cls}`}
-                    >
-                      <div className="text-sm font-semibold">{VERDICT[summary.verdict].title}</div>
-                      <div className="mt-0.5 text-[13px] opacity-90">{VERDICT[summary.verdict].body}</div>
-                    </div>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                      <Stat
-                        label="본인 소득 / 기준 중위소득"
-                        value={`${summary.medianRatioPercent}%`}
-                        note="요건 60% 이하 · 특례 50% 이상"
-                        ok={summary.medianRatioPercent <= 60}
-                      />
-                      <Stat
-                        target="triage-rent"
-                        label="환산 합산 월세"
-                        value={won(summary.totalConvertedRentKRW)}
-                        note="상한 900,000원"
-                        ok={summary.totalConvertedRentKRW <= 900000 || (Number(profile.rentManwon) || 0) <= 70}
-                      />
-                      <Stat
-                        target="triage-special"
-                        label="독립가구 특례"
-                        value={summary.independent ? "적용" : "미적용"}
-                        note="18p [별표2] 제3호"
-                        ok={summary.independent}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <Empty text="계산 결과가 없습니다." />
-                )}
-
-                <Card>
-                  <CardHead title="빠른 자격 확인" desc="공고문 용어 대신 일상 질문으로 확인합니다." />
-                  <div className="space-y-5 p-4">
-                    {policy.questions.map((q, i) => (
-                      <fieldset key={q.id}>
-                        <legend className="text-[13px] font-medium">
-                          <span className="tnum mr-1.5 text-slate-400">{i + 1}</span>
-                          {q.question}
-                        </legend>
-                        <div className="mt-0.5 text-xs text-slate-500">공고문 표현: {q.adminTermReplaced}</div>
-                        <div className="mt-2 space-y-1.5">
-                          {q.options.map((o) => {
-                            const on = answers[q.id] === o.value;
-                            return (
-                              <label
-                                key={o.value}
-                                className={`flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 transition-colors text-[13px] transition-colors ${
-                                  on ? "border-brand-600 bg-brand-50" : "border-slate-200 bg-white hover:border-slate-300"
-                                }`}
-                              >
-                                <input
-                                  type="radio"
-                                  name={q.id}
-                                  checked={on}
-                                  onChange={() => setAnswers((a) => ({ ...a, [q.id]: o.value }))}
-                                  className="mt-0.5 accent-brand-600"
-                                />
-                                <span>
-                                  {o.label}
-                                  {on && <span className="mt-0.5 block text-xs text-slate-600">{o.ruleNote}</span>}
-                                </span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </fieldset>
-                    ))}
-                    {quizDone && (
-                      <div
-                        className={`rounded-md border px-3 py-2.5 text-[13px] ${
-                          quizWarn
-                            ? "border-amber-200 bg-amber-50 text-amber-900"
-                            : "border-emerald-200 bg-emerald-50 text-emerald-900"
-                        }`}
-                      >
-                        {quizWarn
-                          ? `신청 전 조치가 필요합니다: ${quizWarn.ruleNote}`
-                          : quizImpacts.some((o) => o?.ruleImpact === "special_pass")
-                          ? "특례 조항이 적용되어 신청 대상에 해당합니다."
-                          : "기본 요건을 충족해 신청 대상에 해당합니다."}
-                      </div>
-                    )}
-                  </div>
-                </Card>
-
-                <Card>
-                  <CardHead
-                    title="판정 근거 조항"
-                    desc={`시연용 공고문 ${policy.pageCount}p에서 발췌`}
-                    action={<SourceBadge source="sample" />}
-                  />
-                  <ul className="divide-y divide-slate-100">
-                    {policy.announcementExcerpts.map((c) => {
-                      const open = clauseId === c.id;
-                      return (
-                        <li key={c.id}>
-                          <button
-                            onClick={() => setClauseId(open ? "" : c.id)}
-                            aria-expanded={open}
-                            className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-purple-50/40"
-                          >
-                            <span className="w-24 shrink-0 text-xs text-slate-500">{c.page}</span>
-                            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{c.section}</span>
-                            <ChevronDown
-                              className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${open ? "rotate-180 text-purple-600" : ""}`}
-                            />
-                          </button>
-                          {open && (
-                            <div className="animate-expand space-y-2 px-4 pb-4 text-[13px] leading-relaxed">
-                              <p className="border-l-2 border-slate-300 pl-3 text-slate-600">{c.rawText}</p>
-                              <p className="rounded-md bg-brand-50 px-3 py-2 text-slate-800">
-                                <span className="font-medium text-brand-700">쉽게 말하면 </span>
-                                {c.plainTranslation}
-                              </p>
-                            </div>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </Card>
-              </>
+            {/* 발급 가이드: 자격 판정 뒤에만 */}
+            {view === "recipe" && !active && !summary && (
+              <EmptyCta text="내 정보를 입력하면 필요한 서류와 발급 일정이 여기에 표시됩니다." action="내 정보 입력하기" onClick={startInfo} />
             )}
-
-            {/* 발급 가이드 */}
-            {view === "recipe" && !active && (
+            {view === "recipe" && !active && summary && (
               <>
                 <Card target="recipe-docs">
                   <CardHead
@@ -2026,6 +1924,8 @@ export default function Page() {
                   </ul>
                 </Card>
 
+                <DocCalendar docs={requiredDocs} policyTitle={policy.title} />
+
                 <Card target="recipe-exempt">
                   <CardHead title="이 조건에서는 내지 않아도 되는 서류" />
                   <ul className="divide-y divide-slate-100">
@@ -2040,15 +1940,22 @@ export default function Page() {
               </>
             )}
 
-            {/* 사전 검수 */}
-            {view === "audit" && !active && (
+            {/* 제출 = 사전 검수 + 신청 패키지. 서류를 올렸거나 시연을 실행했을 때만 */}
+            {view === "audit" && !active && !hasAudit && (
+              <EmptyCta text="채팅 입력창의 클립 버튼으로 서류를 첨부하면 검수 결과와 신청 패키지가 여기에 표시됩니다." />
+            )}
+            {view === "audit" && !active && hasAudit && (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100/80 p-1 text-[13px]">
                     {(
                       [
-                        ["defect", "예시 세트 A (미비)"],
-                        ["fixed", "예시 세트 B (보완)"],
+                        ...(demoAudit
+                          ? [
+                              ["defect", "예시 세트 A (미비)"],
+                              ["fixed", "예시 세트 B (보완)"],
+                            ]
+                          : []),
                         ...(upload ? [["upload", "내 업로드"]] : []),
                       ] as [AuditMode, string][]
                     ).map(([m, label]) => (
@@ -2087,17 +1994,14 @@ export default function Page() {
               </>
             )}
 
-            {/* 신청 패키지 */}
-            {view === "package" && !active && (
+            {/* 신청 패키지: 검수 결과 바로 아래에 이어서 */}
+            {view === "audit" && !active && hasAudit && (
               <>
-                {auditRisks > 0 && (
-                  <div className="flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3.5 shadow-sm text-[13px] text-amber-900">
-                    <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>
-                      현재 선택된 서류에 반려 위험 {auditRisks}건이 남아 있습니다. 사전 검수 탭에서 보완한 뒤 제출하세요.
-                    </span>
-                  </div>
-                )}
+                <div className="flex items-center gap-2 pt-2 text-xs font-semibold text-slate-500">
+                  <span>신청 패키지</span>
+                  <span className="h-px flex-1 bg-slate-200" />
+                  {auditRisks > 0 && <span className="font-medium text-amber-700">반려 위험 {auditRisks}건 보완 후 제출</span>}
+                </div>
 
                 <Card target="package-form">
                   <CardHead
@@ -2170,6 +2074,8 @@ export default function Page() {
                     ))}
                   </ul>
                 </Card>
+
+                <AfterCare profile={hasProfileInput(profile) ? toProfile(profile) : null} policyTitle={policy.title} />
 
                 <button
                   onClick={downloadPackage}
@@ -2770,9 +2676,8 @@ function PolicyCard({ p, sites, onOpen }: { p: PolicyDetail; sites: Site[]; onOp
         <div className="mt-3 flex flex-wrap gap-1.5">
           {(
             [
-              ["triage", "자격 확인"],
               ["recipe", "서류 준비"],
-              ["audit", "서류 검수"],
+              ["audit", "서류 검수·제출"],
             ] as [View, string][]
           ).map(([v, label]) => (
             <button
@@ -2792,8 +2697,23 @@ function PolicyCard({ p, sites, onOpen }: { p: PolicyDetail; sites: Site[]; onOp
             <ul className="mt-2 space-y-1.5">
               {p.conditions.map((c) => (
                 <li key={c} className="flex items-start gap-2 text-[13px] text-slate-800">
-                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" strokeWidth={2.5} />
-                  {c}
+                  {condTag(c) === "exclude" ? (
+                    <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" strokeWidth={2.5} />
+                  ) : (
+                    <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" strokeWidth={2.5} />
+                  )}
+                  <span>
+                    {condText(c)}
+                    {condTag(c) !== "basic" && (
+                      <span
+                        className={`ml-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                          condTag(c) === "exclude" ? "bg-red-50 text-red-700" : "bg-purple-50 text-purple-700"
+                        }`}
+                      >
+                        {condTag(c) === "exclude" ? "해당 시 제외" : "특례"}
+                      </span>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -3078,6 +2998,17 @@ interface PolicyState {
   audit?: AuditResult;
 }
 
+// 공고문 분석 질문의 꼬리표: (제외)는 "해당"이면 탈락, (특례)는 "아님"이어도 탈락은 아니다
+const condTag = (c: string) => (/\(제외\)\s*$/.test(c) ? "exclude" : /\(특례\)\s*$/.test(c) ? "special" : "basic");
+const condText = (c: string) => c.replace(/\s*\((제외|특례)\)\s*$/, "");
+const condResult = (c: string, a?: CondAnswer): "pass" | "fail" | "neutral" | "open" => {
+  if (!a || a === "unsure") return "open";
+  const t = condTag(c);
+  if (t === "exclude") return a === "yes" ? "fail" : "pass";
+  if (t === "special") return a === "yes" ? "pass" : "neutral";
+  return a === "yes" ? "pass" : "fail";
+};
+
 // 발급처 이름이 내 도구와 같으면 바로 갈 수 있게 링크로
 const siteFor = (sites: Site[], where?: string) =>
   where ? sites.find((s) => where.includes(s.name) || s.name.includes(where)) : undefined;
@@ -3107,99 +3038,6 @@ function AskButton({ q, onAsk, busy, children }: { q: string; onAsk: (q: string)
     >
       {children}
     </button>
-  );
-}
-
-function PolicyTriage({
-  p,
-  st,
-  onChange,
-  onAsk,
-  busy,
-}: {
-  p: PolicyDetail;
-  st: PolicyState;
-  onChange: (s: Partial<PolicyState>) => void;
-  onAsk: (q: string) => void;
-  busy: boolean;
-}) {
-  const cond = st.cond || {};
-  const n = p.conditions.length;
-  const no = p.conditions.filter((_, i) => cond[i] === "no").length;
-  const yes = p.conditions.filter((_, i) => cond[i] === "yes").length;
-  const open = n - yes - no;
-  const verdict = !n
-    ? null
-    : no
-    ? { cls: "border-red-200 bg-red-50 text-red-900", title: `충족하지 않는 조건 ${no}개`, body: "이 조건 때문에 신청이 어려울 수 있습니다. 예외 규정은 공고 원문을 확인하세요." }
-    : open === n
-    ? { cls: "border-slate-200 bg-white text-slate-700", title: "조건마다 해당 여부를 골라 주세요", body: "고른 결과로 신청 가능성을 바로 알려 드립니다." }
-    : open
-    ? { cls: "border-amber-200 bg-amber-50 text-amber-900", title: `확인이 필요한 조건 ${open}개`, body: "모르는 조건은 '물어보기'로 채팅에서 확인할 수 있습니다." }
-    : { cls: "border-emerald-200 bg-emerald-50 text-emerald-900", title: "조건을 모두 충족합니다", body: "신청 대상일 가능성이 높습니다. 최종 판정은 접수 기관이 합니다." };
-
-  return (
-    <>
-      <PolicyHead p={p} />
-      {verdict && (
-        <div data-agent-target="triage-verdict" className={`rounded-2xl border px-4 py-3.5 shadow-sm ${verdict.cls}`}>
-          <div className="text-sm font-semibold">{verdict.title}</div>
-          <div className="mt-0.5 text-[13px] opacity-90">{verdict.body}</div>
-        </div>
-      )}
-      <Card target={verdict ? "triage-conditions" : "triage-verdict"}>
-        <CardHead title="자격 조건 확인" desc={`${yes} / ${n} 충족 · AI가 검색으로 정리한 조건`} />
-        {n ? (
-          <ul className="divide-y divide-slate-100">
-            {p.conditions.map((c, i) => (
-              <li key={c} className="px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <span className="text-[13px] text-slate-800">{c}</span>
-                  {cond[i] === "unsure" && (
-                    <AskButton q={`${p.name} 조건 '${c}'에 대해 자세히 알려줘`} onAsk={onAsk} busy={busy}>
-                      물어보기
-                    </AskButton>
-                  )}
-                </div>
-                <div className="mt-2 inline-flex rounded-xl border border-slate-200 bg-slate-100/80 p-1 text-xs">
-                  {(
-                    [
-                      ["yes", "해당"],
-                      ["no", "아님"],
-                      ["unsure", "모름"],
-                    ] as [CondAnswer, string][]
-                  ).map(([v, label]) => (
-                    <button
-                      key={v}
-                      onClick={() => onChange({ cond: { ...cond, [i]: v } })}
-                      aria-pressed={cond[i] === v}
-                      className={`rounded-lg px-2.5 py-1 transition-all duration-200 ${
-                        cond[i] === v
-                          ? v === "yes"
-                            ? "bg-emerald-500 text-white shadow-sm"
-                            : v === "no"
-                            ? "bg-red-500 text-white shadow-sm"
-                            : "bg-white text-slate-800 shadow-sm ring-1 ring-slate-200/70"
-                          : "text-slate-600 hover:text-slate-900"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="flex items-center justify-between gap-3 px-4 py-4 text-[13px] text-slate-500">
-            확인된 조건이 없습니다.
-            <AskButton q={`${p.name} 자격 조건 알려줘`} onAsk={onAsk} busy={busy}>
-              조건 물어보기
-            </AskButton>
-          </div>
-        )}
-      </Card>
-    </>
   );
 }
 
@@ -3330,8 +3168,10 @@ function PolicyPackage({
   links: { name: string; url: string }[];
 }) {
   const [saved, setSaved] = useState(false);
-  const yes = p.conditions.filter((_, i) => st.cond?.[i] === "yes").length;
-  const no = p.conditions.filter((_, i) => st.cond?.[i] === "no").length;
+  const results = p.conditions.map((c, i) => condResult(c, st.cond?.[i]));
+  const yes = results.filter((r) => r === "pass").length;
+  const no = results.filter((r) => r === "fail").length;
+  const answered = results.filter((r) => r !== "open").length;
   const ready = p.documents.filter((_, i) => st.docs?.[i]).length;
   const risks = st.audit ? risksOf(st.audit) : null;
   const condLabel = (i: number) => ({ yes: "해당", no: "아님", unsure: "모름" })[st.cond?.[i] || "unsure"] || "미확인";
@@ -3346,7 +3186,7 @@ function PolicyPackage({
       `※ AI가 검색으로 정리한 정보입니다. 공고 원문으로 확인하고, 최종 판정은 접수 기관이 합니다.`,
       ``,
       `1. 자격 조건 (${yes}/${p.conditions.length} 충족)`,
-      ...p.conditions.map((c, i) => `- [${st.cond?.[i] ? condLabel(i) : "미확인"}] ${c}`),
+      ...p.conditions.map((c, i) => `- [${st.cond?.[i] ? condLabel(i) : "미확인"}] ${condText(c)}${condTag(c) === "exclude" ? " (해당 시 제외)" : condTag(c) === "special" ? " (특례)" : ""}`),
       ``,
       `2. 필요 서류 (${ready}/${p.documents.length} 준비)`,
       ...p.documents.map((d, i) => `- [${st.docs?.[i] ? "준비" : "미준비"}] ${d.name}${d.where ? ` (${d.where})` : ""}`),
@@ -3373,10 +3213,9 @@ function PolicyPackage({
   return (
     <>
       <PolicyHead p={p} />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Stat label="자격 조건" value={`${yes} / ${p.conditions.length}`} note={no ? `아님 ${no}개` : "자격 판정 탭에서 확인"} ok={!no && yes === p.conditions.length && yes > 0} />
-        <Stat label="서류 준비" value={`${ready} / ${p.documents.length}`} note="발급 가이드 탭에서 체크" ok={ready === p.documents.length && ready > 0} />
-        <Stat label="서류 검수" value={risks === null ? "미실시" : `위험 ${risks}건`} note="사전 검수 탭에서 실행" ok={risks === 0} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Stat label="서류 준비" value={`${ready} / ${p.documents.length}`} note="서류 준비 탭에서 체크" ok={ready === p.documents.length && ready > 0} />
+        <Stat label="서류 검수" value={risks === null ? "미실시" : `위험 ${risks}건`} note="위에서 서류 올리기" ok={risks === 0} />
       </div>
       {steps.length > 0 && (
         <Card target="package-form">
@@ -3533,6 +3372,25 @@ function KeyValues({ title, data }: { title: string; data: Record<string, string
 
 function Empty({ text }: { text: string }) {
   return <div className="px-4 py-10 text-center text-[13px] text-slate-500">{text}</div>;
+}
+
+// 아직 입력이 없을 때 탭에 보여주는 빈 화면 (필요하면 입력 버튼)
+function EmptyCta({ text, action, onClick }: { text: string; action?: string; onClick?: () => void }) {
+  return (
+    <div className="flex min-h-[260px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-10 text-center">
+      <p className="max-w-xs text-[13px] leading-relaxed text-slate-500">{text}</p>
+      {action && onClick && (
+        <button
+          type="button"
+          onClick={onClick}
+          className="inline-flex items-center gap-1 rounded-full bg-purple-600 px-3.5 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-purple-700"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {action}
+        </button>
+      )}
+    </div>
+  );
 }
 
 function KeyField({

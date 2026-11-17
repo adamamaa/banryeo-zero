@@ -46,8 +46,10 @@ export function judgeEligibility(p: {
 }) {
   const ratio = medianRatioPercent(p.monthlyIncomeKRW);
   const rent = convertRent(p.depositKRW, p.rentKRW);
-  const selfIncomeOk = ratio <= 60;
-  const independent = p.age >= 30 || (p.separateLivingMonths >= 12 && ratio >= 50);
+  // 판정은 반올림 전 실제 금액으로 한다 (표시용 ratio는 소수 첫째 자리로 반올림됨)
+  const median = MEDIAN_INCOME_2026[1];
+  const selfIncomeOk = p.monthlyIncomeKRW <= median * 0.6;
+  const independent = p.age >= 30 || (p.separateLivingMonths >= 12 && p.monthlyIncomeKRW >= median * 0.5);
   return {
     ratio,
     rent,

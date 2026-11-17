@@ -703,7 +703,7 @@ export const POLICY_SCENARIOS: PolicyScenario[] = [
             detail:
               "등본(전입일 2025.08.20, 봉천로 123 301호) ↔ 임대차계약서(확정일자 완료, 301호, 보증금 1천/월세 75만) ↔ 가족관계증명서(상세) 간 모순이나 누락 옵션이 전혀 없습니다.",
             ruleReference: "공고문 22~24p [별표4] 전 항목 적격",
-            fixAction: "신청 패키지 탭에서 자동 기입된 신청서를 확인하세요.",
+            fixAction: "제출 탭 아래 신청 패키지에서 자동 기입된 신청서를 확인하세요.",
           },
         ],
         crossCheckMatrix: [

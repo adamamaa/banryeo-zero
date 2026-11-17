@@ -246,7 +246,7 @@ export function auditTextDocs(
       title: "점검한 규칙에서 반려 위험을 찾지 못했습니다",
       detail: `서류 ${parsed.length}건에 대해 발급 옵션과 교차 항목을 확인했습니다.`,
       ruleReference: "공고문 22p [별표4]",
-      fixAction: "신청 패키지 탭에서 자동 기입된 신청서를 확인하세요.",
+      fixAction: "제출 탭 아래 신청 패키지에서 자동 기입된 신청서를 확인하세요.",
     });
   }
 

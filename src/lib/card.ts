@@ -69,7 +69,8 @@ export function parsePolicy(p: Record<string, unknown>): PolicyDetail | null {
     deadline: str(p.deadline, 40) || undefined,
     applyAt: str(p.applyAt, 30) || undefined,
     asOf: str(p.asOf, 40) || undefined,
-    conditions: arr(p.conditions).map((c) => str(c, 60)).filter(Boolean).slice(0, 5),
+    // 공고문 분석은 일상 질문을 최대 8개까지 만든다
+    conditions: arr(p.conditions).map((c) => str(c, 60)).filter(Boolean).slice(0, 8),
     documents: arr(p.documents)
       .map((d) => (typeof d === "string" ? { name: str(d, 40) } : { name: str(d?.name, 40), where: str(d?.where, 30) || undefined }))
       .filter((d) => d.name)

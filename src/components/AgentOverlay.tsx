@@ -293,15 +293,7 @@ export function AgentOverlay({
 
   return (
     <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden" aria-live="polite">
-      {/* 1. 서류/화면 스캔 라인 애니메이션 */}
-      {scanning && !paused && (
-        <div className="absolute inset-0">
-          <div className="animate-agent-scan absolute left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-purple-500 to-transparent shadow-[0_0_18px_4px_rgba(168,85,247,0.45)]" />
-          <div className="animate-agent-scan absolute left-0 right-0 h-16 -translate-y-full bg-gradient-to-b from-transparent to-purple-500/[0.07]" />
-        </div>
-      )}
-
-      {/* 2. 중요 부분 빨간 네모 하이라이트 */}
+      {/* 중요 부분 빨간 네모 하이라이트 (화면을 가로지르는 스캔 라인은 입력창을 가려서 뺐다) */}
       {box && (
         <div
           key={`box-${target?.id}`}
