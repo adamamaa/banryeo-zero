@@ -175,11 +175,9 @@ export function AgentOverlay({
   const cursorPosRef = useRef<Point>({ x: 420, y: 260 });
   const [cursor, setCursor] = useState<Point | null>(null);
   const [trail, setTrail] = useState<Point[]>([]);
-  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number; label: string } | null>(null);
   const [ripple, setRipple] = useState<{ x: number; y: number; id: number } | null>(null);
 
   useEffect(() => {
-    setBox(null);
     setRipple(null);
     setTrail([]);
     if (!target) {
@@ -235,16 +233,6 @@ export function AgentOverlay({
         setCursor({ x, y });
         setTrail((prev) => [{ x, y }, ...prev].slice(0, 7));
 
-        if (target.highlightBox !== false && p > 0.78) {
-          setBox({
-            left: curRect.left - 4,
-            top: curRect.top - 4,
-            width: curRect.width + 8,
-            height: curRect.height + 8,
-            label: target.label,
-          });
-        }
-
         if (p < 1) {
           raf = requestAnimationFrame(step);
         } else {
@@ -267,20 +255,8 @@ export function AgentOverlay({
 
   return (
     <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden" aria-live="polite">
-      {/* 중요 부분 빨간 네모 하이라이트 (화면을 가로지르는 스캔 라인은 입력창을 가려서 뺐다) */}
-      {box && (
-        <div
-          key={`box-${target?.id}`}
-          style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
-          className="animate-target-box fixed rounded-2xl border-2 border-red-500 bg-red-500/[0.03] shadow-[0_0_0_4px_rgba(239,68,68,0.12),0_0_24px_rgba(239,68,68,0.22)] transition-all duration-200"
-        >
-          <span className="absolute -top-3 left-3 inline-flex items-center gap-1 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-semibold tracking-tight text-white shadow-sm">
-            <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
-            {box.label}
-          </span>
-        </div>
-      )}
-
+      {/* 빨간 상자는 화면 좌표에 띄우지 않고 대상 요소에 직접 붙인다 (data-agent-marked, globals.css).
+          띄운 상자는 스크롤을 따라가지 못해 상자가 두 개로 보였다. */}
       {/* 3. 클릭 물결 파동(Ripple) */}
       {ripple && (
         <div key={`ripple-${ripple.id}`} style={{ left: ripple.x, top: ripple.y }} className="fixed">

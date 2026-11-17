@@ -33,3 +33,16 @@ assert.equal(parseCard("그냥 글로 된 답변입니다."), null);
 assert.equal(parseCard('{"summary":""}'), null);
 assert.equal(parseCard("{깨진 json"), null);
 console.log("card ok");
+
+// 숫자 조건(limits): 알 수 없는 항목·값 없는 항목은 버린다
+const lim = parseCard(JSON.stringify({ summary: "s", policies: [{ name: "p", limits: [
+  { field: "age", min: 19, max: 34, label: "만 19~34세" },
+  { field: "income", max: null, min: null, label: "빈 값" },
+  { field: "height", max: 180, label: "없는 항목" },
+  { field: "medianRatio", max: 60 },
+] }] }));
+assert.deepEqual(lim.policies[0].limits, [
+  { field: "age", min: 19, max: 34, label: "만 19~34세" },
+  { field: "medianRatio", max: 60, label: "medianRatio" },
+]);
+console.log("limits ok");

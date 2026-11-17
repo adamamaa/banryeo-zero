@@ -30,7 +30,7 @@ import type { AnswerCard, PolicyDetail } from "@/lib/card";
 import type { AgentAsk, AgentChecklist, AgentDraft } from "@/lib/agent";
 import { AgentOverlay, AgentPlanCard, type AgentPlanStep, type AgentTarget } from "@/components/AgentOverlay";
 import { InfoOnboarding, InfoTags, firstMissing, type InfoKey, type InfoValue, type InfoValues } from "@/components/InfoOnboarding";
-import { AfterCare, BenefitCombo, DocCalendar, NearMissCard } from "@/components/Insights";
+import { AfterCare, BenefitCombo, DocCalendar, NearMissCard, PolicyNearMissCard } from "@/components/Insights";
 import { SidebarRecs } from "@/components/SidebarRecs";
 import { nearMiss } from "@/lib/nearMiss";
 import type { BenefitCtx } from "@/lib/benefits";
@@ -788,11 +788,11 @@ export default function Page() {
           label: item.label,
           id: Date.now() + i * 10 + 1,
         });
-        await new Promise((r) => setTimeout(r, 1300));
+        // 커서가 도착하는 순간(약 1초 뒤) 대상 요소에 빨간 상자를 붙이고 계속 유지한다
+        await new Promise((r) => setTimeout(r, 1000));
         if (stoppedRef.current) return;
-        // 방문한 중요 영역은 빨간 상자로 계속 유지
         setMarkedTargets((prev) => ({ ...prev, [item.selector]: item.label }));
-        await new Promise((r) => setTimeout(r, 900));
+        await new Promise((r) => setTimeout(r, 1200));
       }
       await waitWhilePaused();
       if (stoppedRef.current) return;
@@ -1998,12 +1998,30 @@ export default function Page() {
                 </Card>
               ))}
 
-            {/* 받을 돈 조합: 내 정보 기준이라 기준 정책과 무관하게 보여준다 */}
+            {/* 받을 돈: 위는 기준 정책의 자격 확인, 아래는 내 정보로 본 전체 지원 조합 */}
+            {active && view === "combo" && (
+              <>
+                <PolicyTriage p={active.p} st={pst} onChange={setPst} onAsk={(q) => send(undefined, q)} busy={working} />
+                <PolicyNearMissCard
+                  policyName={active.p.name}
+                  limits={active.p.limits}
+                  profile={{
+                    age: profile.age === "" ? null : profile.age,
+                    incomeManwon: profile.incomeManwon === "" ? null : profile.incomeManwon,
+                    depositManwon: profile.depositManwon === "" ? null : profile.depositManwon,
+                    rentManwon: profile.rentManwon === "" ? null : profile.rentManwon,
+                    sepMonths: profile.sepMonths === "" ? null : profile.sepMonths,
+                  }}
+                />
+                <div className="px-1 pt-2 text-xs font-medium text-slate-500">전체 지원 · 내 정보 기준 (기준 정책과 별개로 계산)</div>
+              </>
+            )}
             {view === "combo" && !hasAnyInfo && (
               <EmptyCta text="내 정보를 입력하면 받을 수 있는 지원과 최대 조합을 계산해 드려요." action="내 정보 입력하기" onClick={startInfo} />
             )}
             {/* 한 끗 차이 진단 (자격 판정 탭에서 옮겨 옴) */}
-            {view === "combo" && hasProfileInput(profile) && <NearMissCard profile={toProfile(profile)} />}
+            {/* 한 끗 차이 진단은 청년월세 규칙 기준이라 시연 시나리오일 때만 */}
+            {view === "combo" && !active && hasProfileInput(profile) && <NearMissCard profile={toProfile(profile)} />}
             {view === "combo" && hasAnyInfo && (
               <BenefitCombo
                 ctx={benefitCtx}
@@ -3270,6 +3288,99 @@ function AskButton({ q, onAsk, busy, children }: { q: string; onAsk: (q: string)
     >
       {children}
     </button>
+  );
+}
+
+function PolicyTriage({
+  p,
+  st,
+  onChange,
+  onAsk,
+  busy,
+}: {
+  p: PolicyDetail;
+  st: PolicyState;
+  onChange: (s: Partial<PolicyState>) => void;
+  onAsk: (q: string) => void;
+  busy: boolean;
+}) {
+  const cond = st.cond || {};
+  const n = p.conditions.length;
+  const no = p.conditions.filter((_, i) => cond[i] === "no").length;
+  const yes = p.conditions.filter((_, i) => cond[i] === "yes").length;
+  const open = n - yes - no;
+  const verdict = !n
+    ? null
+    : no
+    ? { cls: "border-red-200 bg-red-50 text-red-900", title: `충족하지 않는 조건 ${no}개`, body: "이 조건 때문에 신청이 어려울 수 있습니다. 예외 규정은 공고 원문을 확인하세요." }
+    : open === n
+    ? { cls: "border-slate-200 bg-white text-slate-700", title: "조건마다 해당 여부를 골라 주세요", body: "고른 결과로 신청 가능성을 바로 알려 드립니다." }
+    : open
+    ? { cls: "border-amber-200 bg-amber-50 text-amber-900", title: `확인이 필요한 조건 ${open}개`, body: "모르는 조건은 '물어보기'로 채팅에서 확인할 수 있습니다." }
+    : { cls: "border-emerald-200 bg-emerald-50 text-emerald-900", title: "조건을 모두 충족합니다", body: "신청 대상일 가능성이 높습니다. 최종 판정은 접수 기관이 합니다." };
+
+  return (
+    <>
+      <PolicyHead p={p} />
+      {verdict && (
+        <div className={`rounded-lg border px-4 py-3 ${verdict.cls}`}>
+          <div className="text-sm font-semibold">{verdict.title}</div>
+          <div className="mt-0.5 text-[13px] opacity-90">{verdict.body}</div>
+        </div>
+      )}
+      <Card>
+        <CardHead title="자격 조건 확인" desc={`${yes} / ${n} 충족 · AI가 검색으로 정리한 조건`} />
+        {n ? (
+          <ul className="divide-y divide-slate-100">
+            {p.conditions.map((c, i) => (
+              <li key={c} className="px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-[13px] text-slate-800">{c}</span>
+                  {cond[i] === "unsure" && (
+                    <AskButton q={`${p.name} 조건 '${c}'에 대해 자세히 알려줘`} onAsk={onAsk} busy={busy}>
+                      물어보기
+                    </AskButton>
+                  )}
+                </div>
+                <div className="mt-2 inline-flex rounded-md border border-slate-300 bg-white p-0.5 text-xs">
+                  {(
+                    [
+                      ["yes", "해당"],
+                      ["no", "아님"],
+                      ["unsure", "모름"],
+                    ] as [CondAnswer, string][]
+                  ).map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => onChange({ cond: { ...cond, [i]: v } })}
+                      aria-pressed={cond[i] === v}
+                      className={`rounded px-2.5 py-1 transition-colors ${
+                        cond[i] === v
+                          ? v === "yes"
+                            ? "bg-emerald-600 text-white"
+                            : v === "no"
+                            ? "bg-red-600 text-white"
+                            : "bg-slate-700 text-white"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="flex items-center justify-between gap-3 px-4 py-4 text-[13px] text-slate-500">
+            확인된 조건이 없습니다.
+            <AskButton q={`${p.name} 자격 조건 알려줘`} onAsk={onAsk} busy={busy}>
+              조건 물어보기
+            </AskButton>
+          </div>
+        )}
+      </Card>
+    </>
   );
 }
 

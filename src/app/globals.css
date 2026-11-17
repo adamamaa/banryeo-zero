@@ -163,6 +163,17 @@ label:active {
   outline-offset: 2px;
   box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.1), 0 0 22px rgba(239, 68, 68, 0.18) !important;
   transition: outline-color 300ms ease, box-shadow 300ms ease;
+  animation: agent-mark-in 320ms var(--ease-out) both;
+}
+@keyframes agent-mark-in {
+  from {
+    outline-color: transparent;
+    outline-offset: 8px;
+  }
+  to {
+    outline-color: #ef4444;
+    outline-offset: 2px;
+  }
 }
 [data-agent-marked]::after {
   content: "● " attr(data-agent-marked);

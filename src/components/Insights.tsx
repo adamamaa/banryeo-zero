@@ -3,7 +3,8 @@
 import React, { useState } from "react";
 import { AlertTriangle, CalendarPlus, Check, CircleCheck, Search, ShieldAlert, Sparkles, Wand2 } from "lucide-react";
 import type { DocumentRecipe } from "@/data/policies";
-import { nearMiss, type NearMissInput } from "@/lib/nearMiss";
+import { nearMiss, limitNearMiss, type NearMissInput } from "@/lib/nearMiss";
+import type { PolicyLimit } from "@/lib/card";
 import { bestCombo, type BenefitCtx, type NeedKey } from "@/lib/benefits";
 import { downloadIcs } from "@/lib/ics";
 import { MEDIAN_INCOME_2026 } from "@/lib/standards";
@@ -49,10 +50,64 @@ function Head({ icon, title, desc, badge, action }: { icon: React.ReactNode; tit
 /* ① 한 끗 차이 진단 */
 
 const KIND_STYLE = {
+  fail: { label: "미충족", cls: "bg-red-50 text-red-700 ring-red-200", icon: <ShieldAlert className="h-3.5 w-3.5" /> },
   fix: { label: "이렇게 바꾸면", cls: "bg-purple-50 text-purple-700 ring-purple-200", icon: <Wand2 className="h-3.5 w-3.5" /> },
   risk: { label: "아슬아슬", cls: "bg-amber-50 text-amber-800 ring-amber-200", icon: <AlertTriangle className="h-3.5 w-3.5" /> },
   margin: { label: "여유", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200", icon: <CircleCheck className="h-3.5 w-3.5" /> },
 };
+
+// 채팅에서 고른 정책용 한 끗 차이 진단: AI가 정리한 숫자 조건(limits)과 내 정보를 비교한다
+export function PolicyNearMissCard({
+  policyName,
+  limits,
+  profile,
+}: {
+  policyName: string;
+  limits?: PolicyLimit[];
+  profile: Partial<Record<keyof NearMissInput, number | null>>;
+}) {
+  if (!limits?.length) return null;
+  const r = limitNearMiss(limits, profile);
+  const fails = r.items.filter((x) => x.kind === "fail" || x.kind === "fix").length;
+  return (
+    <Box target="policy-nearmiss">
+      <Head
+        icon={<Sparkles className="h-4 w-4" />}
+        title="한 끗 차이 진단"
+        desc={
+          !r.items.length
+            ? "내 정보를 입력하면 숫자 조건과 비교해 드려요"
+            : fails
+            ? `${policyName} · 바꾸면 되는 조건 ${fails}개`
+            : `${policyName} · 숫자 조건을 모두 충족해요`
+        }
+        badge="calc"
+      />
+      {r.items.length > 0 && (
+        <ul className="divide-y divide-slate-100">
+          {r.items.map((it, i) => {
+            const s = KIND_STYLE[it.kind];
+            return (
+              <li key={i} className="flex gap-3 px-4 py-3 text-[13px]">
+                <span className={`mt-0.5 inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-medium ring-1 ${s.cls}`}>
+                  {s.icon}
+                  {it.area}
+                </span>
+                <div className="min-w-0">
+                  <div className="font-medium text-slate-900">{it.title}</div>
+                  <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{it.detail}</p>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="border-t border-slate-100 px-4 py-2.5 text-[11px] text-slate-400">
+        AI가 정리한 숫자 기준으로 계산합니다{r.missing ? ` · 내 정보가 없어 ${r.missing}개 조건은 건너뜀` : ""}. 중위소득은 1인 가구 기준이며 최종 판정은 접수 기관이 합니다.
+      </p>
+    </Box>
+  );
+}
 
 export function NearMissCard({ profile }: { profile: NearMissInput }) {
   const r = nearMiss(profile);
