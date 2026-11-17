@@ -2302,41 +2302,6 @@ export default function Page() {
               </section>
 
               <section>
-                <h3 className="text-[13px] font-semibold">API 연결</h3>
-                <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                  키로 인증하면 실제 데이터와 AI 답변이 연결됩니다.
-                </p>
-                <div className="mt-3 space-y-4">
-                  <KeyField
-                    label="Google Gemini API 키"
-                    hint={apiMsg || "자유 질문 답변과 이미지·PDF 서류 판독에 사용합니다."}
-                    ok={apiConnected}
-                    value={geminiKey}
-                    onChange={setGeminiKey}
-                    placeholder="AIza..."
-                    link={{ href: "https://aistudio.google.com/app/apikey", text: "키 발급" }}
-                  />
-                  <KeyField
-                    label="공공데이터포털 키 (보조금24)"
-                    hint={publicMsg || "정부 지원사업 목록을 실시간으로 조회합니다."}
-                    ok={publicOk}
-                    value={publicKey}
-                    onChange={setPublicKey}
-                    placeholder="data.go.kr 인증키"
-                    link={{ href: "https://www.data.go.kr", text: "키 발급" }}
-                  />
-                  <button
-                    onClick={saveKeys}
-                    disabled={testing}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:opacity-60"
-                  >
-                    {testing && <LoaderCircle className="h-4 w-4 animate-spin" />}
-                    저장하고 연결 확인
-                  </button>
-                </div>
-              </section>
-
-              <section>
                 <h3 className="text-[13px] font-semibold">개인정보와 저장</h3>
                 <p className="mt-1 text-xs leading-relaxed text-slate-500">
                   대화 기록, 도구 목록, API 키는 이 브라우저에만 저장됩니다. 이미지·PDF 서류는 판독을 위해 원본이
