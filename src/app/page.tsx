@@ -1261,38 +1261,26 @@ export default function Page() {
 
       {/* ───────── 결과 패널 ───────── */}
       {canvasOpen && (
-        <section className="flex w-[48%] min-w-[420px] shrink-0 flex-col border-l border-slate-200 bg-slate-50 max-lg:fixed max-lg:inset-0 max-lg:z-30 max-lg:w-full max-lg:min-w-0 animate-slide-in-right">
-          <div className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 bg-white pl-4 pr-2">
-            <div role="tablist" className="flex h-full items-stretch gap-5 overflow-x-auto">
-              {(focusMsg ? [{ id: "answer" as View, label: "답변 근거" }, ...VIEWS] : VIEWS).map((v) => (
-                <button
-                  key={v.id}
-                  role="tab"
-                  aria-selected={view === v.id}
-                  onClick={() => setView(v.id)}
-                  className={`shrink-0 border-b-2 text-[13px] transition-colors ${
-                    view === v.id
-                      ? "border-brand-600 font-semibold text-slate-900"
-                      : "border-transparent text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  {v.label}
-                </button>
-              ))}
-            </div>
+        <section className="flex w-[48%] min-w-[420px] shrink-0 flex-col border-l border-slate-100 bg-[#fbfbfb] max-lg:fixed max-lg:inset-0 max-lg:z-30 max-lg:w-full max-lg:min-w-0 animate-slide-in-right">
+          <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-100 bg-white/80 px-4 backdrop-blur">
+            <PanelTabs
+              tabs={focusMsg ? [{ id: "answer" as View, label: "답변 근거" }, ...VIEWS] : VIEWS}
+              value={view}
+              onChange={setView}
+            />
             <IconButton label="결과 패널 닫기" onClick={() => setCanvasOpen(false)}>
               <X className="h-4 w-4" />
             </IconButton>
           </div>
 
-          <div key={view + ctx} className="animate-fade-in flex-1 space-y-4 overflow-y-auto p-5">
+          <div key={view + ctx} className="stagger flex-1 space-y-4 overflow-y-auto p-5">
             {view !== "answer" && policyOptions.length > 0 && (
               <label className="flex items-center gap-2 text-xs text-slate-500">
                 <span className="shrink-0">기준 정책</span>
                 <select
                   value={active ? active.key : "demo"}
                   onChange={(e) => (e.target.value === "demo" ? setCtx("demo") : choosePolicy(e.target.value))}
-                  className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-[13px] text-slate-800 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/15"
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 shadow-sm hover:border-purple-200 focus:border-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-200"
                 >
                   {policyOptions.map((o) => (
                     <option key={o.key} value={o.key}>
@@ -1350,7 +1338,7 @@ export default function Page() {
                       <button
                         onClick={() => fetchTools()}
                         disabled={toolsLoading}
-                        className="flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-700 active:translate-y-px disabled:opacity-60"
+                        className="flex items-center gap-1.5 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-700 active:translate-y-px disabled:opacity-60"
                       >
                         <RefreshCw className={`h-3.5 w-3.5 ${toolsLoading ? "animate-spin" : ""}`} />
                         다시 계산
@@ -1369,7 +1357,7 @@ export default function Page() {
                     ).map(([k, label, unit]) => (
                       <label key={k} className="block">
                         <span className="text-xs text-slate-500">{label}</span>
-                        <span className="mt-1 flex items-center rounded-md border border-slate-300 bg-white focus-within:border-brand-600 focus-within:ring-2 focus-within:ring-brand-600/15">
+                        <span className="mt-1 flex items-center rounded-lg border border-slate-200 bg-white transition-shadow hover:border-purple-200 focus-within:border-purple-300 focus-within:ring-2 focus-within:ring-purple-200">
                           <input
                             type="number"
                             min={0}
@@ -1403,7 +1391,7 @@ export default function Page() {
               <>
                 {summary ? (
                   <>
-                    <div className={`rounded-lg border px-4 py-3 ${VERDICT[summary.verdict].cls}`}>
+                    <div className={`rounded-2xl border px-4 py-3.5 shadow-sm ${VERDICT[summary.verdict].cls}`}>
                       <div className="text-sm font-semibold">{VERDICT[summary.verdict].title}</div>
                       <div className="mt-0.5 text-[13px] opacity-90">{VERDICT[summary.verdict].body}</div>
                     </div>
@@ -1448,7 +1436,7 @@ export default function Page() {
                             return (
                               <label
                                 key={o.value}
-                                className={`flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2 text-[13px] transition-colors ${
+                                className={`flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 transition-colors text-[13px] transition-colors ${
                                   on ? "border-brand-600 bg-brand-50" : "border-slate-200 bg-white hover:border-slate-300"
                                 }`}
                               >
@@ -1501,16 +1489,16 @@ export default function Page() {
                           <button
                             onClick={() => setClauseId(open ? "" : c.id)}
                             aria-expanded={open}
-                            className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
+                            className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-purple-50/40"
                           >
                             <span className="w-24 shrink-0 text-xs text-slate-500">{c.page}</span>
                             <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{c.section}</span>
                             <ChevronDown
-                              className={`h-4 w-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+                              className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${open ? "rotate-180 text-purple-600" : ""}`}
                             />
                           </button>
                           {open && (
-                            <div className="space-y-2 px-4 pb-4 text-[13px] leading-relaxed">
+                            <div className="animate-expand space-y-2 px-4 pb-4 text-[13px] leading-relaxed">
                               <p className="border-l-2 border-slate-300 pl-3 text-slate-600">{c.rawText}</p>
                               <p className="rounded-md bg-brand-50 px-3 py-2 text-slate-800">
                                 <span className="font-medium text-brand-700">쉽게 말하면 </span>
@@ -1559,7 +1547,7 @@ export default function Page() {
                                 href={d.issuerUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="flex shrink-0 items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white hover:border-purple-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
                               >
                                 발급처 열기 <ExternalLink className="h-3 w-3" />
                               </a>
@@ -1600,7 +1588,7 @@ export default function Page() {
             {view === "audit" && !active && (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="inline-flex rounded-md border border-slate-300 bg-white p-0.5 text-[13px]">
+                  <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100/80 p-1 text-[13px]">
                     {(
                       [
                         ["defect", "예시 세트 A (미비)"],
@@ -1612,8 +1600,8 @@ export default function Page() {
                         key={m}
                         onClick={() => setAuditMode(m)}
                         aria-pressed={auditMode === m}
-                        className={`rounded px-2.5 py-1 transition-colors ${
-                          auditMode === m ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"
+                        className={`rounded-lg px-2.5 py-1 transition-all ${
+                          auditMode === m ? "bg-white text-purple-700 shadow-sm ring-1 ring-slate-200/70" : "text-slate-600 hover:text-slate-900"
                         }`}
                       >
                         {label}
@@ -1635,7 +1623,7 @@ export default function Page() {
                   <button
                     onClick={() => runMission("audit_fixed")}
                     disabled={working}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white hover:border-purple-200 px-3 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
                     보완 서류(세트 B)로 재검수 <ArrowRight className="h-3.5 w-3.5" />
                   </button>
@@ -1647,7 +1635,7 @@ export default function Page() {
             {view === "package" && !active && (
               <>
                 {auditRisks > 0 && (
-                  <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+                  <div className="flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3.5 shadow-sm text-[13px] text-amber-900">
                     <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
                     <span>
                       현재 선택된 서류에 반려 위험 {auditRisks}건이 남아 있습니다. 사전 검수 탭에서 보완한 뒤 제출하세요.
@@ -1664,7 +1652,7 @@ export default function Page() {
                         href="https://www.bokjiro.go.kr"
                         target="_blank"
                         rel="noreferrer"
-                        className="flex shrink-0 items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white hover:border-purple-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
                       >
                         복지로 <ExternalLink className="h-3 w-3" />
                       </a>
@@ -1689,7 +1677,7 @@ export default function Page() {
                       onChange={(e) => setEssay(e.target.value)}
                       rows={9}
                       aria-label="계획서 초안"
-                      className="block w-full rounded-md border border-slate-300 bg-white p-3 text-[13px] leading-relaxed focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/15"
+                      className="block w-full rounded-xl border border-slate-200 bg-white p-3 transition-shadow text-[13px] leading-relaxed focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/15"
                     />
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-600">
                       <span className="tnum">{essay.length.toLocaleString("ko-KR")}자</span>
@@ -1729,7 +1717,7 @@ export default function Page() {
 
                 <button
                   onClick={downloadPackage}
-                  className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700 active:translate-y-px"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700 active:translate-y-px"
                 >
                   {downloaded ? <Check className="h-4 w-4" /> : <Download className="h-4 w-4" />}
                   {downloaded ? "내려받았습니다" : "점검 요약 내려받기 (.txt)"}
@@ -1882,7 +1870,7 @@ export default function Page() {
                   <button
                     onClick={saveKeys}
                     disabled={testing}
-                    className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:opacity-60"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:opacity-60"
                   >
                     {testing && <LoaderCircle className="h-4 w-4 animate-spin" />}
                     저장하고 연결 확인
@@ -2167,7 +2155,7 @@ function CardView({ card, onAsk, disabled }: { card: AnswerCard; onAsk: (q: stri
               href={l.url}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-700"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-700"
             >
               {l.name}
               <ExternalLink className="h-3.5 w-3.5" />
@@ -2295,7 +2283,7 @@ function ToolList({ tools }: { tools: ToolExecution[] }) {
             <button
               onClick={() => setOpenStep(open ? null : t.step)}
               aria-expanded={open}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-purple-50/40"
             >
               <span className="tnum w-4 text-xs text-slate-400">{t.step}</span>
               <StatusDot status={t.status} />
@@ -2304,10 +2292,10 @@ function ToolList({ tools }: { tools: ToolExecution[] }) {
                 <span className="block truncate text-xs text-slate-500">{t.basis}</span>
               </span>
               <SourceBadge source={t.source} />
-              <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+              <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${open ? "rotate-180 text-purple-600" : ""}`} />
             </button>
             {open && (
-              <div className="grid gap-4 bg-slate-50 px-4 py-3 sm:grid-cols-2">
+              <div className="animate-expand grid gap-4 bg-slate-50/70 px-4 py-3 sm:grid-cols-2">
                 <KeyValues title="입력" data={t.input} />
                 <KeyValues title="결과" data={t.output} />
                 <div className="flex items-center justify-between text-xs text-slate-500 sm:col-span-2">
@@ -2351,7 +2339,7 @@ function PolicyCard({ p, sites, onOpen }: { p: PolicyDetail; sites: Site[]; onOp
             <button
               key={v}
               onClick={() => onOpen(v)}
-              className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white hover:border-purple-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
             >
               {label} <ArrowRight className="h-3 w-3" />
             </button>
@@ -2442,7 +2430,7 @@ function AnswerPanel({
                 href={l.url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700"
               >
                 {l.name} <ExternalLink className="h-3.5 w-3.5" />
               </a>
@@ -2539,7 +2527,7 @@ function AuditReport({
   return (
     <>
                 <div
-                  className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${
+                  className={`flex items-center gap-3 rounded-2xl border px-4 py-3.5 shadow-sm ${
                     auditRisks ? "border-red-200 bg-red-50 text-red-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"
                   }`}
                 >
@@ -2714,7 +2702,7 @@ function PolicyTriage({
     <>
       <PolicyHead p={p} />
       {verdict && (
-        <div className={`rounded-lg border px-4 py-3 ${verdict.cls}`}>
+        <div className={`rounded-2xl border px-4 py-3.5 shadow-sm ${verdict.cls}`}>
           <div className="text-sm font-semibold">{verdict.title}</div>
           <div className="mt-0.5 text-[13px] opacity-90">{verdict.body}</div>
         </div>
@@ -2733,7 +2721,7 @@ function PolicyTriage({
                     </AskButton>
                   )}
                 </div>
-                <div className="mt-2 inline-flex rounded-md border border-slate-300 bg-white p-0.5 text-xs">
+                <div className="mt-2 inline-flex rounded-xl border border-slate-200 bg-slate-100/80 p-1 text-xs">
                   {(
                     [
                       ["yes", "해당"],
@@ -2745,13 +2733,13 @@ function PolicyTriage({
                       key={v}
                       onClick={() => onChange({ cond: { ...cond, [i]: v } })}
                       aria-pressed={cond[i] === v}
-                      className={`rounded px-2.5 py-1 transition-colors ${
+                      className={`rounded-lg px-2.5 py-1 transition-all duration-200 ${
                         cond[i] === v
                           ? v === "yes"
-                            ? "bg-emerald-600 text-white"
+                            ? "bg-emerald-500 text-white shadow-sm"
                             : v === "no"
-                            ? "bg-red-600 text-white"
-                            : "bg-slate-700 text-white"
+                            ? "bg-red-500 text-white shadow-sm"
+                            : "bg-white text-slate-800 shadow-sm ring-1 ring-slate-200/70"
                           : "text-slate-600 hover:text-slate-900"
                       }`}
                     >
@@ -2824,7 +2812,7 @@ function PolicyDocs({
                       href={site.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex shrink-0 items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white hover:border-purple-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
                     >
                       {site.name} <ExternalLink className="h-3 w-3" />
                     </a>
@@ -2867,7 +2855,7 @@ function PolicyAudit({
           desc={`필요 서류 ${p.documents.length}종 대비 누락, 발급일, 성명·주소 일치를 확인합니다.`}
           action={
             <label
-              className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700 ${busy ? "pointer-events-none opacity-60" : ""}`}
+              className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700 ${busy ? "pointer-events-none opacity-60" : ""}`}
             >
               {busy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
               서류 올리기
@@ -2971,7 +2959,7 @@ function PolicyPackage({
                   href={l.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-medium text-slate-700 hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white hover:border-purple-200 px-3 py-1.5 text-[13px] font-medium text-slate-700 hover:bg-slate-50"
                 >
                   {l.name} <ExternalLink className="h-3.5 w-3.5" />
                 </a>
@@ -2982,7 +2970,7 @@ function PolicyPackage({
       )}
       <button
         onClick={download}
-        className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700 active:translate-y-px"
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700 active:translate-y-px"
       >
         {saved ? <Check className="h-4 w-4" /> : <Download className="h-4 w-4" />}
         {saved ? "내려받았습니다" : "신청 준비 요약 내려받기 (.txt)"}
@@ -2990,15 +2978,75 @@ function PolicyPackage({
     </>
   );
 }
+function PanelTabs({
+  tabs,
+  value,
+  onChange,
+}: {
+  tabs: { id: View; label: string }[];
+  value: View;
+  onChange: (v: View) => void;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const [ind, setInd] = useState<{ left: number; width: number } | null>(null);
+
+  useEffect(() => {
+    const measure = () => {
+      const el = listRef.current?.querySelector<HTMLButtonElement>(`[data-tab="${value}"]`);
+      if (el) {
+        setInd({ left: el.offsetLeft, width: el.offsetWidth });
+        el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+      }
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [value, tabs.length]);
+
+  return (
+    <div
+      ref={listRef}
+      role="tablist"
+      className="no-scrollbar relative flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-xl bg-slate-100/80 p-1"
+    >
+      {ind && (
+        <span
+          aria-hidden
+          className="tab-indicator absolute bottom-1 left-0 top-1 rounded-lg bg-white shadow-sm ring-1 ring-slate-200/70"
+          style={{ transform: `translateX(${ind.left}px)`, width: ind.width }}
+        />
+      )}
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          data-tab={t.id}
+          role="tab"
+          aria-selected={value === t.id}
+          onClick={() => onChange(t.id)}
+          className={`relative z-10 shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium ${
+            value === t.id ? "text-purple-700" : "text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Card({ children }: { children: React.ReactNode }) {
-  return <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">{children}</section>;
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[border-color,box-shadow] duration-300 hover:border-purple-200/70 hover:shadow-[0_8px_24px_-14px_rgba(126,34,206,0.25)]">
+      {children}
+    </section>
+  );
 }
 
 function CardHead({ title, desc, action }: { title: string; desc?: string; action?: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+    <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3.5">
       <div className="min-w-0">
-        <h3 className="text-sm font-semibold">{title}</h3>
+        <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
         {desc && <p className="mt-0.5 truncate text-xs text-slate-500">{desc}</p>}
       </div>
       {action}
@@ -3008,11 +3056,11 @@ function CardHead({ title, desc, action }: { title: string; desc?: string; actio
 
 function Stat({ label, value, note, ok }: { label: string; value: string; note: string; ok: boolean }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
+    <div className="hover-lift rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
       <div className="text-xs text-slate-500">{label}</div>
-      <div className="tnum mt-1.5 text-xl font-semibold tracking-tight">{value}</div>
+      <div className="tnum mt-1.5 text-xl font-semibold tracking-tight text-slate-900">{value}</div>
       <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500">
-        <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-emerald-500" : "bg-amber-500"}`} />
+        <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-emerald-500" : "bg-amber-500"} ${ok ? "" : "animate-pulse"}`} />
         {note}
       </div>
     </div>

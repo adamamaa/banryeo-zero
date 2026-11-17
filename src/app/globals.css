@@ -115,6 +115,30 @@ label:active {
   box-shadow: 0 12px 28px -12px rgba(126, 34, 206, 0.25);
 }
 
+/* 패널 내용: 카드가 순서대로 떠오르기 */
+.stagger > * {
+  animation: fade-up 460ms var(--ease-out) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 40ms; }
+.stagger > *:nth-child(2) { animation-delay: 90ms; }
+.stagger > *:nth-child(3) { animation-delay: 140ms; }
+.stagger > *:nth-child(4) { animation-delay: 190ms; }
+.stagger > *:nth-child(5) { animation-delay: 240ms; }
+.stagger > *:nth-child(6) { animation-delay: 290ms; }
+.stagger > *:nth-child(n + 7) { animation-delay: 340ms; }
+
+/* 펼침 영역 */
+@keyframes expand {
+  from { opacity: 0; transform: translateY(-4px); clip-path: inset(0 0 100% 0); }
+  to { opacity: 1; transform: translateY(0); clip-path: inset(0 0 0 0); }
+}
+.animate-expand { animation: expand 320ms var(--ease-out) both; }
+
+/* 탭 인디케이터 */
+.tab-indicator {
+  transition: transform 380ms var(--ease-out), width 380ms var(--ease-out), opacity 200ms ease;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
