@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Check, LoaderCircle, Pause, Play, Square, Sparkles } from "lucide-react";
+import { Check, LoaderCircle, Pause, Square, Sparkles } from "lucide-react";
 
 export interface AgentPlanStep {
   label: string;
@@ -26,13 +26,12 @@ export function AgentPlanCard({
   paused,
   steps,
   thought,
-  onTogglePause,
   onStop,
 }: {
   paused: boolean;
   steps: AgentPlanStep[];
   thought: string;
-  onTogglePause: () => void;
+  onTogglePause?: () => void;
   onStop: () => void;
 }) {
   const [typed, setTyped] = useState("");
@@ -74,26 +73,15 @@ export function AgentPlanCard({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={onTogglePause}
-            title={paused ? "다시 진행" : "일시정지"}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-          >
-            {paused ? <Play className="h-3 w-3 text-emerald-600" /> : <Pause className="h-3 w-3" />}
-            <span>{paused ? "계속" : "일시정지"}</span>
-          </button>
-          <button
-            type="button"
-            onClick={onStop}
-            title="즉시 중지 (ESC 또는 마우스 흔들기)"
-            className="inline-flex items-center gap-1 rounded-lg bg-red-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-red-600"
-          >
-            <Square className="h-2.5 w-2.5 fill-current" />
-            <span>중지 ESC</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onStop}
+          title="정지 (ESC 또는 마우스 흔들기)"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+        >
+          <Square className="h-2.5 w-2.5 fill-current text-slate-600" />
+          <span>정지</span>
+        </button>
       </div>
 
       {steps.length > 0 && (
