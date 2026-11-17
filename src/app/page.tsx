@@ -1288,10 +1288,7 @@ export default function Page() {
                   onClick={() => setSidebarOpen(false)}
                   className="text-slate-400 hover:text-slate-700 transition-colors p-1.5 rounded-lg hover:bg-slate-100"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-                    <rect height="18" rx="2" stroke="currentColor" width="18" x="3" y="3" />
-                    <path d="M9 3v18M14 9l-3 3 3 3" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <PanelLeft className="w-4 h-4" />
                 </button>
               </div>
 
