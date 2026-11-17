@@ -582,25 +582,43 @@ export default function Page() {
           }))
         );
         if (thoughts[stepIndex]) setAgentThought(thoughts[stepIndex]);
-      }, stepIndex * 750);
+      }, stepIndex * 1450);
       agentTimersRef.current.push(t);
     });
   };
 
-  const finishAgentWithTarget = (finalThought: string, target?: { selector: string; label: string } | null) => {
+  const finishAgentWithTarget = (
+    finalThought: string,
+    targets?: { selector: string; label: string }[] | { selector: string; label: string } | null
+  ) => {
     if (stoppedRef.current) return;
     clearAgentTimers();
     setAgentScanning(false);
     setAgentSteps((prev) => prev.map((s) => ({ ...s, status: "done" })));
     setAgentThought(finalThought);
-    if (target) {
-      setAgentTarget({ ...target, id: Date.now() });
+
+    const list = !targets ? [] : Array.isArray(targets) ? targets : [targets];
+    if (list.length === 0) {
+      const hideTimer = window.setTimeout(() => {
+        setAgentTarget(null);
+        setAgentActive(false);
+      }, 1600);
+      agentTimersRef.current.push(hideTimer);
+      return;
     }
-    const hideTimer = window.setTimeout(() => {
+
+    (async () => {
+      for (let i = 0; i < list.length; i++) {
+        await waitWhilePaused();
+        if (stoppedRef.current) return;
+        setAgentTarget({ ...list[i], id: Date.now() + i });
+        await new Promise((r) => setTimeout(r, 2350));
+      }
+      await waitWhilePaused();
+      if (stoppedRef.current) return;
       setAgentTarget(null);
       setAgentActive(false);
-    }, 3400);
-    agentTimersRef.current.push(hideTimer);
+    })();
   };
 
   const runMission = async (key: MissionKey) => {
@@ -622,7 +640,10 @@ export default function Page() {
     pendingMsgIdRef.current = id;
     setExpanded((e) => ({ ...e, [id]: true }));
 
-    const planConfig: Record<MissionKey, { labels: string[]; thoughts: string[]; scan: boolean; target: { selector: string; label: string } }> = {
+    const planConfig: Record<
+      MissionKey,
+      { labels: string[]; thoughts: string[]; scan: boolean; targets: { selector: string; label: string }[] }
+    > = {
       triage: {
         labels: ["공고 조건 분석", "소득·월세 환산", "특례 조항 판정"],
         thoughts: [
@@ -631,7 +652,11 @@ export default function Page() {
           "18p [별표2] 제3호 독립가구 특례 적용 여부를 확정합니다.",
         ],
         scan: false,
-        target: { selector: "triage-verdict", label: "핵심 자격 판정" },
+        targets: [
+          { selector: "triage-verdict", label: "핵심 자격 판정" },
+          { selector: "triage-rent", label: "환산 합산 월세" },
+          { selector: "triage-special", label: "독립가구 특례 적용" },
+        ],
       },
       recipe: {
         labels: ["판정 조건 대조", "필수 서류 선별", "발급 옵션 정리"],
@@ -641,7 +666,10 @@ export default function Page() {
           "반려를 막기 위한 발급 체크박스 옵션을 정리합니다.",
         ],
         scan: false,
-        target: { selector: "recipe-docs", label: "필수 발급 서류" },
+        targets: [
+          { selector: "recipe-docs", label: "필수 발급 서류" },
+          { selector: "recipe-exempt", label: "면제 서류 확인" },
+        ],
       },
       audit_defect: {
         labels: ["서류 3종 스캔", "규칙·발급일 점검", "교차 검증 리포트"],
@@ -651,7 +679,11 @@ export default function Page() {
           "등본과 임대차계약서의 주소·성명 일치 여부를 교차 검증합니다.",
         ],
         scan: true,
-        target: { selector: "audit-risk", label: "반려 위험 적발" },
+        targets: [
+          { selector: "audit-risk", label: "반려 위험 적발" },
+          { selector: "audit-findings", label: "보완 방법 안내" },
+          { selector: "audit-crosscheck", label: "서류 간 교차 검증" },
+        ],
       },
       audit_fixed: {
         labels: ["보완 서류 재스캔", "신청서 자동 기입", "계획서 금칙어 점검"],
@@ -661,7 +693,11 @@ export default function Page() {
           "계획서 초안의 금칙어와 권장 키워드 포함 여부를 점검합니다.",
         ],
         scan: true,
-        target: { selector: "package-form", label: "신청서 자동 기입" },
+        targets: [
+          { selector: "package-form", label: "신청서 자동 기입" },
+          { selector: "package-essay", label: "계획서 금칙어 점검" },
+          { selector: "package-files", label: "제출 파일명 규격" },
+        ],
       },
       all: {
         labels: ["자격 요건 계산", "서류 선별", "서류 사전 검수", "신청 패키지 구성"],
@@ -672,7 +708,10 @@ export default function Page() {
           "도구 9개 실행 결과와 출처를 실행 내역 패널에 정리합니다.",
         ],
         scan: true,
-        target: { selector: "tools-list", label: "9개 도구 실행 내역" },
+        targets: [
+          { selector: "tools-input", label: "입력 조건 확인" },
+          { selector: "tools-list", label: "9개 도구 실행 내역" },
+        ],
       },
     };
 
@@ -681,8 +720,11 @@ export default function Page() {
     const ac = new AbortController();
     abortRef.current = ac;
 
-    const data = await fetchTools(activeProfile, m.mode ?? (auditMode === "fixed" ? "fixed" : "defect"), ac.signal);
-    await new Promise((r) => setTimeout(r, 650));
+    const minPlanWait = Math.min(cfg.labels.length * 1450, 4400);
+    const [data] = await Promise.all([
+      fetchTools(activeProfile, m.mode ?? (auditMode === "fixed" ? "fixed" : "defect"), ac.signal),
+      new Promise((r) => setTimeout(r, minPlanWait)),
+    ]);
     await waitWhilePaused();
 
     if (stoppedRef.current) return;
@@ -709,7 +751,7 @@ export default function Page() {
         artifact: { view: m.view, title: copy.title, meta: copy.meta },
         followUps: next[key],
       });
-      finishAgentWithTarget(`${copy.title} 정리 완료 — 강조된 영역을 확인하세요.`, cfg.target);
+      finishAgentWithTarget(`${copy.title} 정리 완료 — 강조된 영역을 확인하세요.`, cfg.targets);
     }
     setWorking(false);
     scrollDown();
@@ -841,7 +883,11 @@ export default function Page() {
         });
         finishAgentWithTarget(
           n ? `반려 위험 ${n}건을 찾았습니다. 빨간 표시 영역을 확인하세요.` : "서류 검수 완료 — 반려 위험이 없습니다.",
-          { selector: "audit-risk", label: n ? `반려 위험 ${n}건` : "검수 완료" }
+          [
+            { selector: "audit-risk", label: n ? `반려 위험 ${n}건` : "검수 완료" },
+            ...(n ? [{ selector: "audit-findings", label: "보완할 항목" }] : []),
+            { selector: "audit-crosscheck", label: "서류 간 교차 검증" },
+          ]
         );
         return;
       }
@@ -926,9 +972,16 @@ export default function Page() {
         }),
       });
       if (eligibility) {
-        finishAgentWithTarget("자격 판정 결과를 패널에 정리했습니다.", { selector: "triage-verdict", label: "자격 판정 결과" });
+        finishAgentWithTarget("자격 판정 결과를 패널에 정리했습니다.", [
+          { selector: "triage-verdict", label: "자격 판정 결과" },
+          { selector: "triage-rent", label: "환산 합산 월세" },
+          { selector: "triage-special", label: "독립가구 특례" },
+        ]);
       } else if (data.card && window.innerWidth >= 1024) {
-        finishAgentWithTarget("답변 근거와 출처를 정리했습니다.", { selector: "answer-summary", label: "답변 핵심 근거" });
+        finishAgentWithTarget("답변 근거와 출처를 정리했습니다.", [
+          { selector: "answer-summary", label: "답변 핵심 근거" },
+          { selector: "answer-steps", label: "신청 체크리스트" },
+        ]);
       } else {
         finishAgentWithTarget("답변 정리를 완료했습니다.", null);
       }
@@ -1599,7 +1652,7 @@ export default function Page() {
             {/* 실행 내역 */}
             {view === "tools" && !active && (
               <>
-                <Card>
+                <Card target="tools-input">
                   <CardHead
                     title="입력 조건"
                     desc="값을 바꾸고 다시 계산하면 판정과 도구 결과가 갱신됩니다."
@@ -1679,12 +1732,14 @@ export default function Page() {
                         ok={summary.medianRatioPercent <= 60}
                       />
                       <Stat
+                        target="triage-rent"
                         label="환산 합산 월세"
                         value={won(summary.totalConvertedRentKRW)}
                         note="상한 900,000원"
                         ok={summary.totalConvertedRentKRW <= 900000 || (Number(profile.rentManwon) || 0) <= 70}
                       />
                       <Stat
+                        target="triage-special"
                         label="독립가구 특례"
                         value={summary.independent ? "적용" : "미적용"}
                         note="18p [별표2] 제3호"
@@ -1846,7 +1901,7 @@ export default function Page() {
                   </ul>
                 </Card>
 
-                <Card>
+                <Card target="recipe-exempt">
                   <CardHead title="이 조건에서는 내지 않아도 되는 서류" />
                   <ul className="divide-y divide-slate-100">
                     {exemptDocs.map((d) => (
@@ -1945,7 +2000,7 @@ export default function Page() {
                   </dl>
                 </Card>
 
-                <Card>
+                <Card target="package-essay">
                   <CardHead title="계획서 초안" desc={form.essayTitle} />
                   <div className="space-y-3 p-4">
                     <textarea
@@ -1979,7 +2034,7 @@ export default function Page() {
                   </div>
                 </Card>
 
-                <Card>
+                <Card target="package-files">
                   <CardHead title="제출 파일명" desc="공고문 규격에 맞춘 이름" />
                   <ul className="divide-y divide-slate-100">
                     {audit.documents.map((d) => (
@@ -2736,7 +2791,7 @@ function AnswerPanel({
       )}
 
       {card.steps.length > 0 && (
-        <Card>
+        <Card target="answer-steps">
           <CardHead
             title="신청 체크리스트"
             desc={`${Object.values(done).filter(Boolean).length} / ${card.steps.length} 완료`}
@@ -2831,7 +2886,7 @@ function AuditReport({
                 </div>
 
                 {auditRisks > 0 && (
-                  <Card>
+                  <Card target="audit-findings">
                     <CardHead title="보완할 항목" />
                     <ol className="divide-y divide-slate-100">
                       {audit.findings
@@ -2858,7 +2913,7 @@ function AuditReport({
                 )}
 
                 {audit.crossCheckMatrix.length > 0 && (
-                  <Card>
+                  <Card target="audit-crosscheck">
                     <CardHead title="서류 간 교차 검증" />
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-[13px]">
@@ -3348,9 +3403,9 @@ function CardHead({ title, desc, action }: { title: string; desc?: string; actio
   );
 }
 
-function Stat({ label, value, note, ok }: { label: string; value: string; note: string; ok: boolean }) {
+function Stat({ label, value, note, ok, target }: { label: string; value: string; note: string; ok: boolean; target?: string }) {
   return (
-    <div className="hover-lift rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+    <div data-agent-target={target} className="hover-lift rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
       <div className="text-xs text-slate-500">{label}</div>
       <div className="tnum mt-1.5 text-xl font-semibold tracking-tight text-slate-900">{value}</div>
       <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500">

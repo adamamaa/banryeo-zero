@@ -236,10 +236,10 @@ export function AgentOverlay({
       const initRect = measure();
       // 부드러운 베지어 곡선 제어점
       const ctrl: Point = {
-        x: (start.x + initRect.cx) / 2 - 48,
-        y: Math.min(start.y, initRect.cy) - 56,
+        x: (start.x + initRect.cx) / 2 - 56,
+        y: Math.min(start.y, initRect.cy) - 64,
       };
-      const duration = 620;
+      const duration = 1150;
       const t0 = performance.now();
 
       const step = (now: number) => {
@@ -256,7 +256,7 @@ export function AgentOverlay({
         setCursor({ x, y });
         setTrail((prev) => [{ x, y }, ...prev].slice(0, 7));
 
-        if (p > 0.72) {
+        if (p > 0.78) {
           setBox({
             left: curRect.left - 4,
             top: curRect.top - 4,
@@ -275,7 +275,7 @@ export function AgentOverlay({
       };
 
       raf = requestAnimationFrame(step);
-    }, 340);
+    }, 420);
 
     return () => {
       cancelled = true;
