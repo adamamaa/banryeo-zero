@@ -165,6 +165,31 @@ label:active {
   animation: target-box-in 260ms var(--ease-out) both;
 }
 
+/* AI가 짚어준 중요 영역: 사용자가 확인 후에도 계속 유지되는 빨간 상자 */
+[data-agent-marked] {
+  position: relative;
+  outline: 2px solid #ef4444 !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.1), 0 0 22px rgba(239, 68, 68, 0.18) !important;
+  transition: outline-color 300ms ease, box-shadow 300ms ease;
+}
+[data-agent-marked]::after {
+  content: "● " attr(data-agent-marked);
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 20;
+  pointer-events: none;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.35);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

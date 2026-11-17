@@ -10,8 +10,10 @@ export interface AgentPlanStep {
 
 export interface AgentTarget {
   selector: string;
+  query?: string;
   label: string;
   id: number;
+  highlightBox?: boolean;
 }
 
 interface AgentOverlayProps {
@@ -203,7 +205,9 @@ export function AgentOverlay({
 
     const startTimer = window.setTimeout(() => {
       if (cancelled) return;
-      const el = document.querySelector<HTMLElement>(`[data-agent-target="${target.selector}"]`);
+      const el = document.querySelector<HTMLElement>(
+        target.query || `[data-agent-target="${target.selector}"]`
+      );
       if (!el) return;
 
       el.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -215,8 +219,8 @@ export function AgentOverlay({
           top: r.top,
           width: r.width,
           height: r.height,
-          cx: r.left + Math.min(r.width * 0.65, r.width - 24),
-          cy: r.top + Math.min(r.height * 0.35, 38),
+          cx: r.left + Math.min(r.width * 0.55, r.width - 16),
+          cy: r.top + Math.min(r.height * 0.45, 28),
         };
       };
 
@@ -227,7 +231,7 @@ export function AgentOverlay({
         x: (start.x + initRect.cx) / 2 - 56,
         y: Math.min(start.y, initRect.cy) - 64,
       };
-      const duration = 1150;
+      const duration = 950;
       const t0 = performance.now();
 
       const step = (now: number) => {
@@ -244,7 +248,7 @@ export function AgentOverlay({
         setCursor({ x, y });
         setTrail((prev) => [{ x, y }, ...prev].slice(0, 7));
 
-        if (p > 0.78) {
+        if (target.highlightBox !== false && p > 0.78) {
           setBox({
             left: curRect.left - 4,
             top: curRect.top - 4,
@@ -263,7 +267,7 @@ export function AgentOverlay({
       };
 
       raf = requestAnimationFrame(step);
-    }, 420);
+    }, 260);
 
     return () => {
       cancelled = true;

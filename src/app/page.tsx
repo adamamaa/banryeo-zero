@@ -271,6 +271,7 @@ export default function Page() {
   const [agentSteps, setAgentSteps] = useState<AgentPlanStep[]>([]);
   const [agentThought, setAgentThought] = useState("");
   const [agentTarget, setAgentTarget] = useState<AgentTarget | null>(null);
+  const [markedTargets, setMarkedTargets] = useState<Record<string, string>>({});
   const abortRef = useRef<AbortController | null>(null);
   const pausedRef = useRef(false);
   const stoppedRef = useRef(false);
@@ -316,6 +317,7 @@ export default function Page() {
     setCtx("demo");
     setAnswers({});
     setDoneDocs({});
+    setMarkedTargets({});
     setView("tools");
   };
   const openChat = (id: string) => {
@@ -538,6 +540,16 @@ export default function Page() {
     }[key];
   };
 
+  // 탭을 전환하거나 스크롤해도 AI가 짚어준 빨간 상자 표시를 계속 유지
+  useEffect(() => {
+    document.querySelectorAll<HTMLElement>("[data-agent-target]").forEach((el) => {
+      const key = el.getAttribute("data-agent-target") || "";
+      const label = markedTargets[key];
+      if (label) el.setAttribute("data-agent-marked", label);
+      else el.removeAttribute("data-agent-marked");
+    });
+  }, [markedTargets, view, canvasOpen, tools, summary, upload, messages]);
+
   const clearAgentTimers = () => {
     agentTimersRef.current.forEach((t) => window.clearTimeout(t));
     agentTimersRef.current = [];
@@ -580,6 +592,7 @@ export default function Page() {
     setAgentActive(true);
     setAgentScanning(scan);
     setAgentTarget(null);
+    setMarkedTargets({});
     setAgentSteps(labels.map((label, i) => ({ label, status: i === 0 ? "active" : "pending" })));
     setAgentThought(thoughts[0] || "");
 
@@ -601,7 +614,10 @@ export default function Page() {
 
   const finishAgentWithTarget = (
     finalThought: string,
-    targets?: { selector: string; label: string }[] | { selector: string; label: string } | null
+    targets?:
+      | { tab?: View; selector: string; label: string }[]
+      | { tab?: View; selector: string; label: string }
+      | null
   ) => {
     if (stoppedRef.current) return;
     clearAgentTimers();
@@ -619,12 +635,51 @@ export default function Page() {
       return;
     }
 
+    const tabLabelMap: Record<View, string> = {
+      answer: "답변 근거",
+      tools: "실행 내역",
+      triage: "자격 판정",
+      recipe: "발급 가이드",
+      audit: "사전 검수",
+      package: "신청 패키지",
+    };
+
     (async () => {
+      let currentTab: View | undefined;
       for (let i = 0; i < list.length; i++) {
+        const item = list[i];
         await waitWhilePaused();
         if (stoppedRef.current) return;
-        setAgentTarget({ ...list[i], id: Date.now() + i });
-        await new Promise((r) => setTimeout(r, 2350));
+
+        // 지정된 탭이 있으면 커서가 탭 버튼을 직접 클릭해 전환
+        if (item.tab && item.tab !== currentTab) {
+          setAgentTarget({
+            selector: `tab-${item.tab}`,
+            query: `[data-tab="${item.tab}"]`,
+            label: `${tabLabelMap[item.tab]} 탭`,
+            highlightBox: false,
+            id: Date.now() + i * 10,
+          });
+          await new Promise((r) => setTimeout(r, 1250));
+          await waitWhilePaused();
+          if (stoppedRef.current) return;
+          setView(item.tab);
+          currentTab = item.tab;
+          await new Promise((r) => setTimeout(r, 320));
+        }
+
+        await waitWhilePaused();
+        if (stoppedRef.current) return;
+        setAgentTarget({
+          selector: item.selector,
+          label: item.label,
+          id: Date.now() + i * 10 + 1,
+        });
+        await new Promise((r) => setTimeout(r, 1300));
+        if (stoppedRef.current) return;
+        // 방문한 중요 영역은 빨간 상자로 계속 유지
+        setMarkedTargets((prev) => ({ ...prev, [item.selector]: item.label }));
+        await new Promise((r) => setTimeout(r, 900));
       }
       await waitWhilePaused();
       if (stoppedRef.current) return;
@@ -654,7 +709,7 @@ export default function Page() {
 
     const planConfig: Record<
       MissionKey,
-      { labels: string[]; thoughts: string[]; scan: boolean; targets: { selector: string; label: string }[] }
+      { labels: string[]; thoughts: string[]; scan: boolean; targets: { tab?: View; selector: string; label: string }[] }
     > = {
       triage: {
         labels: ["공고 조건 분석", "소득·월세 환산", "특례 조항 판정"],
@@ -665,9 +720,9 @@ export default function Page() {
         ],
         scan: false,
         targets: [
-          { selector: "triage-verdict", label: "핵심 자격 판정" },
-          { selector: "triage-rent", label: "환산 합산 월세" },
-          { selector: "triage-special", label: "독립가구 특례 적용" },
+          { tab: "triage", selector: "triage-verdict", label: "핵심 자격 판정" },
+          { tab: "triage", selector: "triage-rent", label: "환산 합산 월세" },
+          { tab: "triage", selector: "triage-special", label: "독립가구 특례 적용" },
         ],
       },
       recipe: {
@@ -679,8 +734,8 @@ export default function Page() {
         ],
         scan: false,
         targets: [
-          { selector: "recipe-docs", label: "필수 발급 서류" },
-          { selector: "recipe-exempt", label: "면제 서류 확인" },
+          { tab: "recipe", selector: "recipe-docs", label: "필수 발급 서류" },
+          { tab: "recipe", selector: "recipe-exempt", label: "면제 서류 확인" },
         ],
       },
       audit_defect: {
@@ -692,9 +747,9 @@ export default function Page() {
         ],
         scan: true,
         targets: [
-          { selector: "audit-risk", label: "반려 위험 적발" },
-          { selector: "audit-findings", label: "보완 방법 안내" },
-          { selector: "audit-crosscheck", label: "서류 간 교차 검증" },
+          { tab: "audit", selector: "audit-risk", label: "반려 위험 적발" },
+          { tab: "audit", selector: "audit-findings", label: "보완 방법 안내" },
+          { tab: "audit", selector: "audit-crosscheck", label: "서류 간 교차 검증" },
         ],
       },
       audit_fixed: {
@@ -706,9 +761,9 @@ export default function Page() {
         ],
         scan: true,
         targets: [
-          { selector: "package-form", label: "신청서 자동 기입" },
-          { selector: "package-essay", label: "계획서 금칙어 점검" },
-          { selector: "package-files", label: "제출 파일명 규격" },
+          { tab: "package", selector: "package-form", label: "신청서 자동 기입" },
+          { tab: "package", selector: "package-essay", label: "계획서 금칙어 점검" },
+          { tab: "package", selector: "package-files", label: "제출 파일명 규격" },
         ],
       },
       all: {
@@ -721,8 +776,11 @@ export default function Page() {
         ],
         scan: true,
         targets: [
-          { selector: "tools-input", label: "입력 조건 확인" },
-          { selector: "tools-list", label: "9개 도구 실행 내역" },
+          { tab: "tools", selector: "tools-list", label: "9개 도구 실행 내역" },
+          { tab: "triage", selector: "triage-verdict", label: "핵심 자격 판정" },
+          { tab: "recipe", selector: "recipe-docs", label: "필수 발급 서류" },
+          { tab: "audit", selector: "audit-risk", label: "반려 위험 적발" },
+          { tab: "package", selector: "package-form", label: "신청서 자동 기입" },
         ],
       },
     };
