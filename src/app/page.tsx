@@ -1015,10 +1015,17 @@ export default function Page() {
               )}
               <button
                 type="button"
+                aria-label={canvasOpen ? "점검 패널 닫기" : "점검 패널 열기"}
+                title={canvasOpen ? "점검 패널 닫기" : "점검 패널 열기"}
+                aria-pressed={canvasOpen}
                 onClick={() => setCanvasOpen((v) => !v)}
-                className="bg-[#121212] hover:bg-black text-white px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm"
+                className={`p-1.5 rounded-lg transition-colors ${
+                  canvasOpen
+                    ? "bg-purple-50 text-purple-700 hover:bg-purple-100"
+                    : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                }`}
               >
-                {canvasOpen ? "패널 닫기" : "점검 패널"}
+                <PanelRight className="w-4 h-4" />
               </button>
             </div>
           </header>
@@ -1268,8 +1275,8 @@ export default function Page() {
               value={view}
               onChange={setView}
             />
-            <IconButton label="결과 패널 닫기" onClick={() => setCanvasOpen(false)}>
-              <X className="h-4 w-4" />
+            <IconButton label="점검 패널 닫기" onClick={() => setCanvasOpen(false)} className="lg:hidden">
+              <PanelRight className="h-4 w-4" />
             </IconButton>
           </div>
 
