@@ -2309,14 +2309,21 @@ export default function Page() {
                 </p>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <button
+                    type="button"
                     role="switch"
                     aria-checked={maskOnScreen}
                     onClick={() => setMaskOnScreen((v) => !v)}
                     className="flex items-center gap-2.5 text-[13px] text-slate-700"
                   >
-                    <span className={`relative h-4 w-7 rounded-full transition-colors ${maskOnScreen ? "bg-brand-600" : "bg-slate-300"}`}>
+                    <span
+                      className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${
+                        maskOnScreen ? "bg-brand-600" : "bg-slate-300"
+                      }`}
+                    >
                       <span
-                        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${maskOnScreen ? "translate-x-3.5" : "translate-x-0.5"}`}
+                        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                          maskOnScreen ? "translate-x-4" : "translate-x-0"
+                        }`}
                       />
                     </span>
                     주민번호 화면 마스킹

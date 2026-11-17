@@ -205,10 +205,11 @@ export function AgentOverlay({
   const [ripple, setRipple] = useState<{ x: number; y: number; id: number } | null>(null);
 
   useEffect(() => {
+    setBox(null);
+    setRipple(null);
+    setTrail([]);
     if (!target) {
-      setBox(null);
-      setRipple(null);
-      setTrail([]);
+      setCursor(null);
       return;
     }
 
