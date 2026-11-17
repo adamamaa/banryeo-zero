@@ -24,7 +24,7 @@ import { POLICY_SCENARIOS } from "@/data/policies";
 import type { ToolExecution, ToolSource } from "@/lib/tools";
 import type { AuditResult } from "@/lib/docRules";
 import type { AnswerCard, PolicyDetail } from "@/lib/card";
-import { AgentOverlay, type AgentPlanStep, type AgentTarget } from "@/components/AgentOverlay";
+import { AgentOverlay, AgentPlanCard, type AgentPlanStep, type AgentTarget } from "@/components/AgentOverlay";
 
 const policy = POLICY_SCENARIOS[0];
 const form = policy.applicationFormTemplate;
@@ -1047,10 +1047,7 @@ export default function Page() {
         active={agentActive}
         paused={agentPaused}
         scanning={agentScanning}
-        steps={agentSteps}
-        thought={agentThought}
         target={agentTarget}
-        onTogglePause={toggleAgentPause}
         onStop={stopAgent}
       />
       <div className="flex h-full w-full overflow-hidden bg-white">
@@ -1335,9 +1332,20 @@ export default function Page() {
                         className={`animate-fade-up space-y-3 transition-all duration-300 ${canvasOpen && view === "answer" && focusId === msg.id ? "-ml-4 border-l-2 border-brand-600 pl-[14px]" : ""}`}
                       >
                         {msg.pending ? (
-                          <div className="flex items-center gap-2.5 text-sm text-slate-500">
-                            <LiquidOrb size="sm" />
-                            <span>찾아보고 정리하는 중 · 보통 20초 안팎</span>
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2.5 text-sm text-slate-500">
+                              <LiquidOrb size="sm" />
+                              <span>찾아보고 정리하는 중 · 보통 20초 안팎</span>
+                            </div>
+                            {agentActive && (
+                              <AgentPlanCard
+                                paused={agentPaused}
+                                steps={agentSteps}
+                                thought={agentThought}
+                                onTogglePause={toggleAgentPause}
+                                onStop={stopAgent}
+                              />
+                            )}
                           </div>
                         ) : (
                           <>
