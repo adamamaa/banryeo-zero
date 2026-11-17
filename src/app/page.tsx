@@ -1111,9 +1111,9 @@ export default function Page() {
                         className={`animate-fade-up space-y-3 transition-all duration-300 ${canvasOpen && view === "answer" && focusId === msg.id ? "-ml-4 border-l-2 border-brand-600 pl-[14px]" : ""}`}
                       >
                         {msg.pending ? (
-                          <div className="flex items-center gap-2 text-sm text-slate-500">
-                            <LoaderCircle className="h-4 w-4 animate-spin text-purple-600" />
-                            찾아보고 정리하는 중 · 보통 20초 안팎
+                          <div className="flex items-center gap-2.5 text-sm text-slate-500">
+                            <LiquidOrb size="sm" />
+                            <span>찾아보고 정리하는 중 · 보통 20초 안팎</span>
                           </div>
                         ) : (
                           <>
@@ -1923,8 +1923,9 @@ export default function Page() {
 
 /* ───────── 작은 구성 요소 ───────── */
 
-function LiquidOrb() {
+function LiquidOrb({ size = "md" }: { size?: "md" | "sm" }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const small = size === "sm";
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1932,8 +1933,10 @@ function LiquidOrb() {
 
     function syncSize() {
       if (!canvas) return;
-      const w = canvas.clientWidth || 144;
-      const h = canvas.clientHeight || 144;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const fallback = small ? 36 : 144;
+      const w = Math.round((canvas.clientWidth || fallback) * dpr);
+      const h = Math.round((canvas.clientHeight || fallback) * dpr);
       if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
         canvas.height = h;
@@ -2101,10 +2104,16 @@ void main() {
       window.removeEventListener("mousemove", onMove);
       ro?.disconnect();
     };
-  }, []);
+  }, [small]);
 
   return (
-    <div className="animate-orb w-36 h-36 mx-auto mb-3 relative z-10">
+    <div
+      className={
+        small
+          ? "animate-orb h-9 w-9 shrink-0 relative z-10"
+          : "animate-orb w-36 h-36 mx-auto mb-3 relative z-10"
+      }
+    >
       <canvas ref={canvasRef} className="block w-full h-full" />
     </div>
   );
