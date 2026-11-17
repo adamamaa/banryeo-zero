@@ -317,7 +317,7 @@ export function InfoTags({
         onClick={toggle}
         aria-expanded={false}
         title="내 정보 펼치기"
-        className="inline-flex max-w-full items-center gap-1 rounded-full bg-purple-50 px-2.5 py-0.5 text-[11px] font-medium text-purple-700 ring-1 ring-purple-200/70 transition-colors hover:bg-purple-100"
+        className="inline-flex max-w-full items-center gap-1 rounded-full bg-purple-50 px-2.5 py-1 text-[11px] font-medium text-purple-700 ring-1 ring-purple-200/70 transition-colors hover:bg-purple-100"
       >
         <span className="truncate">
           내 정보 {filled.length}개 · {filled.slice(0, 2).map((q) => `#${q.tag(values[q.key] as string | number)}`).join(" ")}
@@ -329,7 +329,7 @@ export function InfoTags({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="order-first flex w-full flex-wrap items-center gap-1.5">
       {filled.map((q) => (
         <button
           key={q.key}

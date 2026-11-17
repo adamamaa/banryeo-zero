@@ -2,6 +2,8 @@ import { MEDIAN_INCOME_2026, convertRent } from "./standards";
 
 // 중복수급 충돌 + 최대 수령 조합.
 // 정책 목록·금액·중복 규칙은 시연용 예시 데이터다. 실제 신청 전 공고 원문으로 확인해야 한다.
+// 금액·일정은 2026-11-17 웹 검색으로 맞춤 (국민취업지원제도 2026년 월 60만 원, 청년도약계좌 신규 종료 후 청년미래적금,
+// 청년월세 2026년 신규 접수 3/30~5/29). AI 답변과 숫자가 엇갈리지 않게 하려는 것이며 공식 공고로 재확인 필요.
 
 export interface BenefitCtx {
   sido: string;
@@ -67,20 +69,20 @@ const jobIn = (c: BenefitCtx, jobs: string[], label: string) => () =>
 export const BENEFITS: Benefit[] = [
   {
     id: "rent-national",
-    name: "청년월세 한시 특별지원",
+    name: "청년월세 지원",
     org: "국토교통부",
-    amount: 2_400_000,
-    amountText: "월 20만 원 × 12개월",
+    amount: 2_400_000, // 1년 기준 (최대 24개월 480만 원)
+    amountText: "월 20만 원 × 최대 24개월",
     kind: "현금",
     conflicts: ["rent-seoul", "housing-benefit"],
-    applyStart: "2026-11-02",
-    applyEnd: "2026-12-30",
+    // 2026년 신규 접수 기간 (상시화됐지만 지자체 접수 일정은 따로 공고됨)
+    applyStart: "2026-03-30",
+    applyEnd: "2026-05-29",
     url: "https://www.bokjiro.go.kr",
     docs: [
       { name: "주민등록등본", validDays: 30 },
       { name: "가족관계증명서 (상세)", validDays: 90 },
       { name: "임대차계약서 (확정일자)", validDays: null },
-      { name: "청약통장 가입확인서", validDays: 30 },
     ],
     check: (c) =>
       rules(c, [
@@ -141,8 +143,8 @@ export const BENEFITS: Benefit[] = [
     id: "job-kua",
     name: "국민취업지원제도 I유형 (구직촉진수당)",
     org: "고용노동부",
-    amount: 3_000_000,
-    amountText: "월 50만 원 × 6개월",
+    amount: 3_600_000,
+    amountText: "월 60만 원 × 6개월 (부양가족 1인당 월 10만 원 추가)",
     kind: "현금",
     conflicts: ["allowance-seoul"],
     url: "https://www.work24.go.kr",
@@ -178,7 +180,7 @@ export const BENEFITS: Benefit[] = [
     amount: 1_200_000,
     amountText: "월 10만 원 매칭 × 12개월 (3년 유지 시 지급)",
     kind: "자산형성",
-    conflicts: ["save-doyak"],
+    conflicts: ["save-mirae"],
     applyStart: "2027-01-04",
     applyEnd: "2027-01-22",
     url: "https://www.bokjiro.go.kr",
@@ -200,15 +202,17 @@ export const BENEFITS: Benefit[] = [
       ]),
   },
   {
-    id: "save-doyak",
-    name: "청년도약계좌 (정부기여금)",
+    // 청년도약계좌는 2025-12-31 신규 가입 종료. 후속 상품인 청년미래적금(연 2회 6월·12월 모집)으로 대체
+    id: "save-mirae",
+    name: "청년미래적금 (정부기여금)",
     org: "금융위원회",
-    amount: 396_000,
-    amountText: "월 최대 3.3만 원 × 12개월",
+    amount: 360_000, // 일반형: 월 50만 원 × 12개월 × 6%
+    amountText: "월 50만 원 납입 시 기여금 6% (우대형 12%) · 3년 만기",
     kind: "자산형성",
     conflicts: ["save-naeil"],
+    // 12월 2차 모집 예정 (확정 일정 공고 전이라 12월 한 달로 둔 예시)
     applyStart: "2026-12-01",
-    applyEnd: "2026-12-11",
+    applyEnd: "2026-12-31",
     url: "https://www.kinfa.or.kr",
     docs: [{ name: "소득금액증명", validDays: 90 }],
     check: (c) =>
@@ -219,8 +223,8 @@ export const BENEFITS: Benefit[] = [
             ? need("incomeManwon", "월 소득")
             : c.incomeManwon <= 0
             ? no("소득이 있어야 정부기여금 대상")
-            : c.incomeManwon * 12 > 7500
-            ? no("개인소득 연 7,500만 원 이하만 대상")
+            : c.incomeManwon * 12 > 6000
+            ? no("총급여 연 6,000만 원 이하만 대상 (일반형)")
             : null,
       ]),
   },

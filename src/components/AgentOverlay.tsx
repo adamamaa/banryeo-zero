@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Check, LoaderCircle, Pause, Square, Sparkles } from "lucide-react";
+import { Check, LoaderCircle, Sparkles } from "lucide-react";
 
 export interface AgentPlanStep {
   label: string;
@@ -28,13 +28,11 @@ export function AgentPlanCard({
   paused,
   steps,
   thought,
-  onStop,
 }: {
   paused: boolean;
   steps: AgentPlanStep[];
   thought: string;
   onTogglePause?: () => void;
-  onStop: () => void;
 }) {
   const [typed, setTyped] = useState("");
   const prevThoughtRef = useRef("");
@@ -65,65 +63,41 @@ export function AgentPlanCard({
     return () => window.clearInterval(timer);
   }, [thought, paused]);
 
-  const currentStep = steps.find((s) => s.status === "active") || steps[steps.length - 1];
-  const doneCount = steps.filter((s) => s.status === "done").length;
 
   return (
     <div className="w-full max-w-[460px] animate-fade-up rounded-2xl border border-purple-200/90 bg-white/95 p-3 shadow-[0_10px_28px_-14px_rgba(109,40,217,0.22)]">
-      <div className="flex items-center justify-between gap-2">
-        <div className="inline-flex min-w-0 items-center gap-2 rounded-full bg-purple-50 px-2.5 py-1 text-xs font-semibold text-purple-800 ring-1 ring-purple-200/80">
-          {paused ? (
-            <Pause className="h-3 w-3 shrink-0 text-amber-600" />
-          ) : (
-            <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-purple-600" />
-          )}
-          <span className="truncate">
-            {paused ? "일시정지됨" : currentStep?.label || "AI 에이전트 실행 중"}
-          </span>
-          {steps.length > 0 && (
-            <span className="tnum shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[10px] text-purple-600">
-              {Math.min(doneCount + (paused ? 0 : 1), steps.length)}/{steps.length}
-            </span>
-          )}
-        </div>
-
-        <button
-          type="button"
-          onClick={onStop}
-          title="정지 (ESC 또는 마우스 흔들기)"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-        >
-          <Square className="h-2.5 w-2.5 fill-current text-slate-600" />
-          <span>정지</span>
-        </button>
-      </div>
-
+      {/* 할 일 목록: 점선 원 = 대기, 회전 = 진행 중, 체크 = 완료 */}
       {steps.length > 0 && (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
+        <ol className="space-y-1.5">
           {steps.map((st, idx) => (
-            <span
+            <li
               key={idx}
-              className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-[11px] transition-colors ${
-                st.status === "done"
-                  ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70"
-                  : st.status === "active"
-                  ? "bg-purple-100/80 font-medium text-purple-800 ring-1 ring-purple-300"
-                  : "bg-slate-100 text-slate-400"
+              className={`flex items-start gap-2 text-[13px] leading-5 transition-colors ${
+                st.status === "pending" ? "text-slate-500" : st.status === "active" ? "font-medium text-slate-900" : "text-slate-600"
               }`}
             >
-              {st.status === "done" ? (
-                <Check className="h-3 w-3" strokeWidth={2.5} />
-              ) : (
-                <span className="tnum text-[10px]">{idx + 1}.</span>
-              )}
-              <span>{st.label}</span>
-            </span>
+              <span className="grid h-5 w-4 shrink-0 place-items-center" aria-hidden>
+                {st.status === "done" ? (
+                  <span className="grid h-4 w-4 place-items-center rounded-full bg-emerald-500 text-white">
+                    <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                  </span>
+                ) : st.status === "active" && !paused ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin text-slate-400" />
+                ) : (
+                  <span className="h-3.5 w-3.5 rounded-full border border-dashed border-slate-400" />
+                )}
+              </span>
+              <span className="min-w-0">
+                <span className="sr-only">{{ done: "완료", active: "진행 중", pending: "대기" }[st.status]} · </span>
+                {st.label}
+              </span>
+            </li>
           ))}
-        </div>
+        </ol>
       )}
 
       {typed && (
-        <p className="mt-2 border-t border-slate-100 pt-2 text-xs leading-relaxed text-slate-600">
+        <p className={`text-xs leading-relaxed text-slate-600 ${steps.length ? "mt-2 border-t border-slate-100 pt-2" : ""}`}>
           <span className="mr-1.5 font-semibold text-purple-600">AI 판단</span>
           <span>{typed}</span>
           {!paused && typed.length < thought.length && (

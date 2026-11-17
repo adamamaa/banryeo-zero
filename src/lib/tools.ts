@@ -194,7 +194,7 @@ export async function runToolChain(p: ToolChainParams) {
       input: { 대상: "주민등록번호 뒷자리 · 휴대전화 · 계좌번호" },
       output: {
         "텍스트 서류": "마스킹 후에만 외부 모델로 전송",
-        "이미지·PDF 서류": "원본이 Gemini로 전송됨 (판독 결과만 마스킹)",
+        "이미지·PDF 서류": "원본이 외부 AI 판독 서버로 전송됨 (판독 결과만 마스킹)",
         서버저장: "저장하지 않음 (요청 처리 후 폐기)",
       },
       status: "done",

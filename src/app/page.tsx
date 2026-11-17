@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
+  Copy,
   Download,
   ExternalLink,
   FileText,
@@ -16,6 +17,8 @@ import {
   Paperclip,
   Plus,
   RefreshCw,
+  Square,
+  ListChecks,
   Plug,
   Trash2,
   X,
@@ -24,6 +27,7 @@ import { POLICY_SCENARIOS } from "@/data/policies";
 import type { ToolExecution, ToolSource } from "@/lib/tools";
 import type { AuditResult } from "@/lib/docRules";
 import type { AnswerCard, PolicyDetail } from "@/lib/card";
+import type { AgentAsk, AgentChecklist, AgentDraft } from "@/lib/agent";
 import { AgentOverlay, AgentPlanCard, type AgentPlanStep, type AgentTarget } from "@/components/AgentOverlay";
 import { InfoOnboarding, InfoTags, firstMissing, type InfoKey, type InfoValue, type InfoValues } from "@/components/InfoOnboarding";
 import { AfterCare, BenefitCombo, DocCalendar, NearMissCard } from "@/components/Insights";
@@ -95,6 +99,18 @@ interface ExtraInfo {
 }
 const EMPTY_EXTRA: ExtraInfo = { sido: "", sigungu: "", job: "" };
 const PROFILE_KEYS: (keyof Profile)[] = ["age", "incomeManwon", "depositManwon", "rentManwon", "sepMonths"];
+// AI 되묻기(ask_user)의 field → 내 정보 항목과 단위
+const ASK_FIELDS: Record<string, { key?: keyof Profile; unit: string; type: "number" | "date" | "text" }> = {
+  age: { key: "age", unit: "세", type: "number" },
+  income: { key: "incomeManwon", unit: "만 원", type: "number" },
+  deposit: { key: "depositManwon", unit: "만 원", type: "number" },
+  rent: { key: "rentManwon", unit: "만 원", type: "number" },
+  sepMonths: { key: "sepMonths", unit: "개월", type: "number" },
+  householdSize: { unit: "명", type: "number" },
+  parentIncome: { unit: "만 원", type: "number" },
+  parentHouseholdSize: { unit: "명", type: "number" },
+  moveInDate: { unit: "", type: "date" },
+};
 const isProfileKey = (k: InfoKey): k is keyof Profile => (PROFILE_KEYS as string[]).includes(k);
 
 // 첫 방문 질문으로 저장한 내 정보 (브라우저에만 저장)
@@ -128,6 +144,13 @@ interface Message {
   artifact?: { view: View; title: string; meta: string };
   followUps?: MissionKey[];
   sources?: { title: string; url: string; registered?: boolean }[];
+  // AI가 판정에 필요한 정보를 되물은 경우. answer는 사용자가 답한 값
+  ask?: AgentAsk & { answer?: string };
+  // 실행 단계 산출물: AI가 쓴 제출용 초안과 제출 직전 체크리스트 (사용자가 고치고 체크한 상태 포함)
+  draft?: AgentDraft;
+  checklist?: AgentChecklist;
+  // 이 답변에 쓴 모델과 추론 수준 (AI가 질문 난이도를 보고 고름)
+  reasoning?: { model: string; level: "medium" | "high"; reason: string; by: "ai" | "rule" };
   card?: AnswerCard;
 }
 
@@ -250,7 +273,6 @@ export default function Page() {
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [view, setView] = useState<View>("combo");
 
-  const [geminiKey, setGeminiKey] = useState("");
   const [publicKey, setPublicKey] = useState("");
   const [apiConnected, setApiConnected] = useState(false);
   const [apiMsg, setApiMsg] = useState("");
@@ -297,6 +319,8 @@ export default function Page() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // 오른쪽 패널 '답변 근거' 탭이 보여주는 답변
   const [focusId, setFocusId] = useState<string | null>(null);
+  // AI가 되물은 정보의 상태: waiting(답 대기) → resolved(답 반영 후 재판정)
+  const [askState, setAskState] = useState<{ status: "waiting" | "resolved"; question: string; reason?: string; answer?: string } | null>(null);
   // 패널 탭들의 기준 정책: "demo"(청년월세 시연 공고) 또는 "메시지id#정책순번"
   const [ctx, setCtx] = useState("demo");
   // 정책별 자격 응답·서류 준비·검수 결과 (브라우저에 저장)
@@ -393,6 +417,7 @@ export default function Page() {
     setDemoAudit(false);
     setProfile(loadSavedInfo().profile);
     setFocusId(null);
+    setAskState(null);
     setCtx("demo");
     setAnswers({});
     setDoneDocs({});
@@ -469,18 +494,18 @@ export default function Page() {
     }
   };
 
-  const verifyKey = async (key: string) => {
+  // Gemini 키는 서버(.env.local)에만 둔다. 브라우저는 연결 상태만 확인한다.
+  const verifyKey = async () => {
     setTesting(true);
     try {
       const res = await fetch("/api/agent/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "ping", apiKey: key }),
+        body: JSON.stringify({ action: "ping" }),
       });
       const data = await res.json();
       setApiConnected(Boolean(data.connected));
       setApiMsg(data.message || "");
-      if (data.connected && key) localStorage.setItem("gonggopass_gemini_key", key);
     } catch {
       setApiConnected(false);
       setApiMsg("서버에 연결하지 못했습니다.");
@@ -490,10 +515,10 @@ export default function Page() {
   };
 
   useEffect(() => {
-    const g = localStorage.getItem("gonggopass_gemini_key") || "";
-    setGeminiKey(g);
+    // 예전 버전이 브라우저에 저장한 키는 지운다 (남아 있으면 서버 키보다 먼저 쓰여, 한도 초과 키가 계속 쓰였다)
+    localStorage.removeItem("gonggopass_gemini_key");
     setPublicKey(localStorage.getItem("gonggopass_public_key") || "");
-    verifyKey(g);
+    verifyKey();
     setChats(loadLocal<Chat[]>("gonggopass_chats", []));
     const saved = loadLocal<{ added: string[]; custom: Site[] } | null>("gonggopass_tools", null);
     if (saved) {
@@ -552,9 +577,8 @@ export default function Page() {
   }, [messages, chatId, loaded]);
 
   const saveKeys = async () => {
-    if (!geminiKey) localStorage.removeItem("gonggopass_gemini_key");
     localStorage.setItem("gonggopass_public_key", publicKey);
-    await verifyKey(geminiKey);
+    await verifyKey();
     if (publicKey) {
       try {
         const res = await fetch("/api/agent/run", {
@@ -1004,8 +1028,20 @@ export default function Page() {
     return { ok: finalOk, data: finalData };
   };
 
+  // AI 되묻기에 답하면: 내 정보를 갱신하고(저장) 같은 대화를 이어서 다시 판정한다
+  const answerAsk = (msgId: string, a: AgentAsk, value: string, label: string) => {
+    const key = ASK_FIELDS[a.field || ""]?.key;
+    const num = Number(value);
+    const override = key && value !== "" && Number.isFinite(num) ? { [key]: Math.max(0, num) } : undefined;
+    if (key && override) setInfo(key, num);
+    setMessages((prev) => prev.map((m) => (m.id === msgId && m.ask ? { ...m, ask: { ...m.ask, answer: label } } : m)));
+    setAskState({ status: "resolved", question: a.question, answer: label });
+    send(undefined, `${a.question} → ${label}`, undefined, override);
+  };
+
   // ask: 후속 질문 칩처럼 입력창을 거치지 않고 바로 보내는 질문, filesArg: 패널에서 올린 서류
-  const send = async (e?: React.FormEvent, ask?: string, filesArg?: Staged[]) => {
+  const send = async (e?: React.FormEvent, ask?: string, filesArg?: Staged[], profileOverride?: Partial<ProfileInput>) => {
+    const prof: ProfileInput = { ...profile, ...profileOverride };
     e?.preventDefault();
     const typed = (ask ?? input).trim();
     const files = filesArg ?? (ask ? [] : staged);
@@ -1052,7 +1088,6 @@ export default function Page() {
         const { ok, data } = await callRunStream(
           {
             action: "ocr_audit_docs",
-            apiKey: geminiKey,
             uploadedDocs: files,
             ...(auditFor && { policy: auditFor.p }),
           },
@@ -1077,10 +1112,10 @@ export default function Page() {
         }
         setView("audit");
         setCanvasOpen(true);
-        const engine = data.mode === "gemini" ? "Gemini 판독" : "규칙 엔진";
+        const engine = data.mode === "gemini" ? "AI 판독" : "규칙 엔진";
         const skippedList = Array.isArray(data.skippedFiles) ? data.skippedFiles : [];
         const skipped = skippedList.length
-          ? `\n\n검수하지 못한 파일: ${skippedList.join(", ")} (이미지·PDF는 Gemini API 키 필요)`
+          ? `\n\n검수하지 못한 파일: ${skippedList.join(", ")} (이미지·PDF는 AI API 키 필요)`
           : "";
         patch(id, {
           content:
@@ -1111,7 +1146,6 @@ export default function Page() {
       const { ok, data } = await callRunStream(
         {
           action: "agent_chat",
-          apiKey: geminiKey,
           publicDataApiKey: publicKey,
           userMessage: text,
           uploadedDocs: files,
@@ -1130,14 +1164,14 @@ export default function Page() {
           sites: myTools.map(({ name, url }) => ({ name, url })),
           // 입력하지 않은 항목은 보내지 않는다 (서버가 시연 기본값을 쓴다). 0은 0으로 보낸다.
           userProfile:
-            hasProfileInput(profile) || extra.sido || extra.job
+            hasProfileInput(prof) || extra.sido || extra.job
               ? {
                   sigungu: extra.sigungu || undefined,
-                  age: profile.age === "" ? undefined : profile.age,
-                  income: profile.incomeManwon === "" ? undefined : profile.incomeManwon,
-                  deposit: profile.depositManwon === "" ? undefined : profile.depositManwon,
-                  rent: profile.rentManwon === "" ? undefined : profile.rentManwon,
-                  sepMonths: profile.sepMonths === "" ? undefined : profile.sepMonths,
+                  age: prof.age === "" ? undefined : prof.age,
+                  income: prof.incomeManwon === "" ? undefined : prof.incomeManwon,
+                  deposit: prof.depositManwon === "" ? undefined : prof.depositManwon,
+                  rent: prof.rentManwon === "" ? undefined : prof.rentManwon,
+                  sepMonths: prof.sepMonths === "" ? undefined : prof.sepMonths,
                   sido: extra.sido || undefined,
                   job: extra.job || undefined,
                 }
@@ -1158,6 +1192,17 @@ export default function Page() {
       const replyText = String(data.reply);
       const cardData = data.card as AnswerCard | undefined;
       const eligibility = data.kind === "eligibility";
+      const askData = data.kind === "ask" ? (data.ask as AgentAsk | undefined) : undefined;
+      if (askData) {
+        setAskState({ status: "waiting", question: askData.question, reason: askData.reason });
+        if (window.innerWidth >= 1024) {
+          setView("combo");
+          setCanvasOpen(true);
+        }
+      } else {
+        // 보낼 때의 상태가 아니라 최신 상태를 본다 (답변 직후 보낸 요청은 'resolved'를 유지해야 함)
+        setAskState((s) => (s?.status === "waiting" ? null : s));
+      }
       if (eligibility) {
         // 채팅으로 계산한 결과도 패널(자격 판정·한 끗 차이)에 반영한다
         if (data.summary) setSummary(data.summary as Summary);
@@ -1178,16 +1223,30 @@ export default function Page() {
         // 넓은 화면에서만 자동으로 연다 (좁은 화면에선 패널이 채팅을 가린다)
         if (window.innerWidth >= 1024) setCanvasOpen(true);
       }
+      // 에이전트가 서류 대조 도구를 썼으면 그 결과를 해당 정책의 '사전 검수' 탭에 넣는다
+      if (data.auditResult) {
+        const auditKey = cardData?.policies?.length ? `${id}#0` : null;
+        if (auditKey) {
+          setPolicyState((s) => ({ ...s, [auditKey]: { ...s[auditKey], audit: data.auditResult as AuditResult } }));
+        } else {
+          setUpload({ result: data.auditResult as AuditResult, mode: "gemini" });
+          setAuditMode("upload");
+        }
+      }
       patch(id, {
         content:
           replyText +
           (data.needsKey
-            ? "\n\n연결 설정에서 Gemini API 키를 넣으면 등록한 사이트를 검색해 질문 내용에 맞춰 답변합니다."
+            ? "\n\n연결 설정에서 AI API 키를 넣으면 등록한 사이트를 검색해 질문 내용에 맞춰 답변합니다."
             : "") +
-          (cardData ? "" : relatedLinks(text, replyText)),
+          (cardData || askData ? "" : relatedLinks(text, replyText)),
         traces: data.toolExecutions as ToolExecution[] | undefined,
         sources: data.sources as { title: string; url: string; registered?: boolean }[] | undefined,
         card: cardData || undefined,
+        reasoning: (data.reasoning as Message["reasoning"]) || undefined,
+        ask: askData,
+        draft: (data.draft as AgentDraft | undefined) || undefined,
+        checklist: (data.checklist as AgentChecklist | undefined) || undefined,
         ...(eligibility && {
           artifact: { view: "combo" as View, title: "자격 판정 결과", meta: "입력 조건 기준 계산" },
           followUps: ["recipe", "audit_defect"] as MissionKey[],
@@ -1275,21 +1334,20 @@ export default function Page() {
   ) : null;
 
   const promptCard = (
+    // 두 층 입력창: 위 회색 띠(내 정보 · 첨부 파일) + 아래 흰 입력 카드(입력칸 · 첨부 · 보내기/정지)
     <form
       onSubmit={send}
-      className="w-full bg-white border border-slate-200/90 rounded-2xl shadow-input p-3 transition-shadow focus-within:ring-2 focus-within:ring-purple-200 focus-within:border-purple-300"
+      className="w-full rounded-[20px] border border-purple-100 bg-white/60 shadow-input transition-shadow focus-within:border-purple-300 focus-within:ring-2 focus-within:ring-purple-200"
     >
-      {!onboard && (
-        <div className="pb-2">
-          <InfoTags
-            values={info}
-            onEdit={(k) => setOnboard({ startKey: k, single: true })}
-            onStart={() => setOnboard({ startKey: firstMissing(info), single: false })}
-          />
-        </div>
-      )}
-      {staged.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pb-2">
+      {(!onboard || staged.length > 0) && (
+        <div className="flex flex-wrap items-center gap-1.5 px-3.5 py-2">
+          {!onboard && (
+            <InfoTags
+              values={info}
+              onEdit={(k) => setOnboard({ startKey: k, single: true })}
+              onStart={() => setOnboard({ startKey: firstMissing(info), single: false })}
+            />
+          )}
           {staged.map((f, i) => (
             <FileChip
               key={`${f.fileName}-${i}`}
@@ -1299,39 +1357,52 @@ export default function Page() {
           ))}
         </div>
       )}
-      <textarea
-        rows={2}
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            send();
-          }
-        }}
-        aria-label="메시지 입력"
-        placeholder="청년 정책을 물어보거나 공고문·서류를 첨부하세요..."
-        className="w-full text-sm border-0 focus:ring-0 resize-none p-1 text-slate-700 placeholder:text-slate-400 outline-none bg-transparent"
-      />
-      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-        <div className="flex items-center space-x-2">
+      <div className="rounded-[20px] bg-white px-3.5 pb-2.5 pt-3 ring-1 ring-purple-100">
+        <textarea
+          rows={2}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              send();
+            }
+          }}
+          aria-label="메시지 입력"
+          placeholder="청년 정책을 물어보거나 공고문·서류를 첨부하세요"
+          // 기본 두 줄, 길어지면 최대 8줄까지 늘어난다 (field-sizing 미지원 브라우저는 두 줄 고정 + 스크롤)
+          className="block min-h-[3rem] w-full resize-none border-0 bg-transparent px-0.5 text-[15px] leading-6 text-slate-700 outline-none placeholder:text-slate-400 focus:ring-0 [field-sizing:content] max-h-52"
+        />
+        <div className="mt-1.5 flex items-center justify-between">
           <label
             aria-label="서류 첨부"
             title="서류 첨부"
-            className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-slate-100 text-slate-600 transition-colors hover:bg-slate-200/80"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-slate-200 text-slate-600 transition-colors hover:bg-slate-50"
           >
-            <Paperclip className="w-3.5 h-3.5 text-slate-500" />
+            <Paperclip className="h-4 w-4" />
             <input type="file" multiple accept=".pdf,image/*,.txt" onChange={onFiles} className="sr-only" />
           </label>
+          {working ? (
+            <button
+              type="button"
+              onClick={stopAgent}
+              aria-label="정지"
+              title="정지 (ESC)"
+              className="grid h-8 w-8 place-items-center rounded-full text-slate-900 transition-colors hover:bg-slate-100"
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim() && !staged.length}
+              aria-label="보내기"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-600 text-white transition-colors hover:bg-purple-700 disabled:bg-slate-200 disabled:text-slate-400"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </button>
+          )}
         </div>
-        <button
-          type="submit"
-          disabled={working || (!input.trim() && !staged.length)}
-          aria-label="보내기"
-          className="w-7 h-7 rounded-full bg-purple-200 hover:bg-purple-300 text-purple-700 flex items-center justify-center transition-colors disabled:opacity-40"
-        >
-          {working ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : <ArrowUp className="w-3.5 h-3.5" />}
-        </button>
       </div>
     </form>
   );
@@ -1487,7 +1558,7 @@ export default function Page() {
                     <p className="text-xs font-medium text-slate-800 truncate leading-tight">연결 및 개인정보 설정</p>
                     <p className="text-[11px] text-slate-400 truncate leading-tight mt-0.5 flex items-center gap-1.5">
                       <span className={`inline-block h-1.5 w-1.5 rounded-full ${apiConnected ? "bg-emerald-500" : "bg-slate-400"}`} />
-                      {apiConnected ? "Gemini AI 연결됨" : "기본 규칙 검수 모드"}
+                      {apiConnected ? "AI 연결됨" : "기본 규칙 검수 모드"}
                     </p>
                   </div>
                 </div>
@@ -1500,7 +1571,7 @@ export default function Page() {
         </aside>
 
         {/* ───────── 메인 워크스페이스 ───────── */}
-        <main className="flex-1 flex flex-col bg-white overflow-hidden relative justify-between min-w-0">
+        <main className="flex-1 flex flex-col bg-[#f6f4fe] overflow-hidden relative justify-between min-w-0">
           <header className="h-16 px-6 shrink-0 flex items-center justify-between border-b border-transparent">
             <div className="flex items-center gap-2">
               {!sidebarOpen && (
@@ -1539,35 +1610,27 @@ export default function Page() {
           </header>
 
           <div className="flex-1 overflow-y-auto no-scrollbar">
-            <div className="px-6 md:px-8 max-w-3xl mx-auto w-full flex flex-col items-center pt-2 pb-6">
+            <div className="px-6 md:px-8 max-w-3xl mx-auto w-full min-h-full flex flex-col items-center pt-2 pb-6">
               {messages.length === 0 ? (
-                <div className="w-full flex flex-col items-center">
-                  <div className="flex flex-col items-center text-center mb-5">
-                    <LiquidOrb />
-                    <h2 className="animate-fade-up delay-2 text-xl font-medium text-brand-400 tracking-tight mb-1">
-                      공고패스 AI 사전 점검
-                    </h2>
-                    <h1 className="animate-fade-up delay-3 text-2xl font-bold text-slate-900 tracking-tight">
-                      지원금 신청서, 내기 전에 먼저 점검하세요
+                // 첫 화면: 한 줄 소개 → 시연 단계 (입력창은 맨 아래 고정)
+                <div className="flex w-full flex-1 flex-col items-center justify-center">
+                  <div className="mb-6 flex flex-col items-center text-center">
+                    <h1 className="animate-fade-up delay-2 text-2xl font-bold tracking-tight text-slate-900">
+                      신청 전에, 떨어질 이유부터 찾아드려요
                     </h1>
-                    <p className="animate-fade-up delay-4 mt-1.5 text-xs text-slate-500">
-                      공고문 조건으로 자격을 계산하고 준비한 서류를 접수 기준에 맞춰 제출 전에 검수합니다.
+                    <p className="animate-fade-up delay-3 mt-2 text-sm text-slate-500">
+                      자격 계산부터 서류 검수, 사유서까지 AI가 먼저 확인합니다
                     </p>
                   </div>
 
-                  <div className="animate-fade-up delay-5 w-full mb-5 space-y-3">
-                    {infoCard}
-                    {promptCard}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full">
+                  <div className="mb-4 grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     {(["triage", "recipe", "audit_defect", "audit_fixed"] as MissionKey[]).map((k, idx) => (
                       <button
                         key={k}
                         onClick={() => runMission(k)}
                         disabled={working}
                         style={{ animationDelay: `${420 + idx * 70}ms` }}
-                        className="animate-fade-up hover-lift p-3.5 text-left bg-slate-50/70 hover:bg-white border border-slate-100 rounded-xl hover:border-purple-200 group disabled:opacity-50"
+                        className="animate-fade-up hover-lift rounded-xl border border-purple-100 bg-white p-3.5 text-left shadow-sm hover:border-purple-300 group disabled:opacity-50"
                       >
                         <div className="mb-2">
                           <span className="tnum inline-block text-[10px] font-semibold text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">
@@ -1579,6 +1642,7 @@ export default function Page() {
                       </button>
                     ))}
                   </div>
+
                 </div>
               ) : (
                 <div className="w-full space-y-6 py-2">
@@ -1616,8 +1680,6 @@ export default function Page() {
                                 paused={agentPaused}
                                 steps={agentSteps}
                                 thought={agentThought}
-                                onTogglePause={toggleAgentPause}
-                                onStop={stopAgent}
                               />
                             )}
                           </div>
@@ -1666,6 +1728,41 @@ export default function Page() {
                               </div>
                             )}
 
+                            {msg.ask && (
+                              <AskCard ask={msg.ask} disabled={working} onAnswer={(v, label) => answerAsk(msg.id, msg.ask!, v, label)} />
+                            )}
+
+                            {msg.card && (msg.draft || msg.checklist) && (
+                              <div className="flex flex-wrap gap-1.5">
+                                {msg.checklist && (
+                                  <button
+                                    onClick={() => {
+                                      setFocusId(msg.id);
+                                      setView("answer");
+                                      setCanvasOpen(true);
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] text-slate-700 hover:border-brand-600 hover:text-brand-700"
+                                  >
+                                    <ListChecks className="h-3.5 w-3.5" />
+                                    제출 체크리스트 {msg.checklist.items.length}단계
+                                  </button>
+                                )}
+                                {msg.draft && (
+                                  <button
+                                    onClick={() => {
+                                      setFocusId(msg.id);
+                                      setView("answer");
+                                      setCanvasOpen(true);
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] text-slate-700 hover:border-brand-600 hover:text-brand-700"
+                                  >
+                                    <FileText className="h-3.5 w-3.5" />
+                                    {msg.draft.title} 초안
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
                             {msg.card && (
                               <button
                                 onClick={() => {
@@ -1679,6 +1776,22 @@ export default function Page() {
                                 <PanelRight className="h-3.5 w-3.5" />
                                 근거 보기 · 도구 {msg.traces?.length || 0}건 · 출처 {msg.sources?.length || 0}곳
                               </button>
+                            )}
+
+                            {msg.reasoning && (
+                              <div
+                                title={`${msg.reasoning.by === "ai" ? "AI가" : "규칙으로"} 질문 난이도를 판단해 고른 추론 수준`}
+                                className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500"
+                              >
+                                <span
+                                  className={`rounded px-1.5 py-0.5 font-medium ${
+                                    msg.reasoning.level === "high" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"
+                                  }`}
+                                >
+                                  {msg.reasoning.level === "high" ? "깊게 생각함" : "기본 추론"}
+                                </span>
+                                <span>{msg.reasoning.reason}</span>
+                              </div>
                             )}
 
                             {!msg.card && msg.sources && msg.sources.length > 0 && (
@@ -1754,12 +1867,10 @@ export default function Page() {
             </div>
           </div>
 
-          {messages.length > 0 && (
-            <div className="shrink-0 px-6 md:px-8 pb-3 max-w-3xl mx-auto w-full space-y-3">
-              {infoCard}
-              {promptCard}
-            </div>
-          )}
+          <div className="shrink-0 px-6 md:px-8 pb-3 max-w-3xl mx-auto w-full space-y-3">
+            {infoCard}
+            {promptCard}
+          </div>
 
           <footer className="h-10 px-6 shrink-0 flex items-center justify-center border-t border-transparent text-[11px] text-slate-400">
             <p className="text-center truncate">
@@ -1804,6 +1915,42 @@ export default function Page() {
               </div>
             ) : (
               <>
+                {askState && (
+                  <div
+                    className={`flex items-start gap-2.5 rounded-lg border px-4 py-3 text-[13px] ${
+                      askState.status === "waiting"
+                        ? "border-amber-200 bg-amber-50 text-amber-900"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-900"
+                    }`}
+                  >
+                    {askState.status === "waiting" ? (
+                      <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                    ) : working ? (
+                      <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+                    ) : (
+                      <Check className="mt-0.5 h-4 w-4 shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <div className="font-semibold">
+                        {askState.status === "waiting"
+                          ? "판정 보류 · 확인이 필요한 정보가 있습니다"
+                          : working
+                          ? "답변을 반영해 다시 판정하는 중"
+                          : "답변을 반영해 다시 판정했습니다"}
+                      </div>
+                      <div className="mt-0.5 opacity-90">
+                        {askState.question}
+                        {askState.status === "resolved" && askState.answer ? ` → ${askState.answer}` : ""}
+                      </div>
+                      {askState.status === "waiting" && (
+                        <div className="mt-0.5 text-xs opacity-75">
+                          {askState.reason ? `${askState.reason} · ` : ""}채팅에서 답하면 자동으로 다시 판정합니다
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {view !== "answer" && policyOptions.length > 0 && (
               <label className="flex items-center gap-2 text-xs text-slate-500">
                 <span className="shrink-0">기준 정책</span>
@@ -1828,6 +1975,7 @@ export default function Page() {
             {/* 제출 = 서류 검수 + 신청 패키지 */}
             {active && view === "audit" && (
               <>
+                {linkedMsg && <ActionOutputs msg={linkedMsg} onUpdate={(p) => patch(linkedMsg.id, p)} />}
                 <PolicyAudit p={active.p} st={pst} onUpload={uploadForPolicy} busy={working} display={display} />
                 <PolicyPackage p={active.p} st={pst} steps={active.steps} links={active.links} />
               </>
@@ -1842,6 +1990,7 @@ export default function Page() {
                   card={focusMsg.card}
                   sites={myTools}
                   onOpen={(i, v) => choosePolicy(`${focusMsg.id}#${i}`, v)}
+                  onUpdate={(p) => patch(focusMsg.id, p)}
                 />
               ) : (
                 <Card>
@@ -1973,7 +2122,7 @@ export default function Page() {
                   </div>
                   {auditMode === "upload" && upload ? (
                     <span className="text-xs text-slate-500">
-                      검수 방식: {upload.mode === "gemini" ? "Gemini 판독" : "규칙 엔진"}
+                      검수 방식: {upload.mode === "gemini" ? "AI 판독" : "규칙 엔진"}
                     </span>
                   ) : (
                     <SourceBadge source="sample" />
@@ -2211,7 +2360,7 @@ export default function Page() {
                 <h3 className="text-[13px] font-semibold">개인정보와 저장</h3>
                 <p className="mt-1 text-xs leading-relaxed text-slate-500">
                   대화 기록, 도구 목록, API 키는 이 브라우저에만 저장됩니다. 이미지·PDF 서류는 판독을 위해 원본이
-                  Gemini로 전송됩니다.
+                  외부 AI 서버로 전송됩니다.
                 </p>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <button
@@ -2451,6 +2600,80 @@ void main() {
       }
     >
       <canvas ref={canvasRef} className="block w-full h-full" />
+    </div>
+  );
+}
+
+function AskCard({
+  ask,
+  onAnswer,
+  disabled,
+}: {
+  ask: AgentAsk & { answer?: string };
+  onAnswer: (value: string, label: string) => void;
+  disabled: boolean;
+}) {
+  const [value, setValue] = useState("");
+  const f = ASK_FIELDS[ask.field || ""] || { unit: "", type: "text" as const };
+  if (ask.answer) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-slate-500">
+        <Check className="h-3.5 w-3.5 text-emerald-600" strokeWidth={2.5} />
+        답변함: {ask.answer}
+      </div>
+    );
+  }
+  // 직접 입력한 숫자에만 단위를 붙인다 (AI가 준 선택지는 그대로)
+  const submit = (v: string, fromOption = false) => {
+    const t = v.trim();
+    if (!t || disabled) return;
+    onAnswer(t, !fromOption && f.type === "number" && f.unit ? `${t}${f.unit}` : t);
+  };
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+      <div className="text-xs font-medium text-amber-900">AI가 판정하려면 이 정보가 필요합니다</div>
+      {ask.options && ask.options.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {ask.options.map((o) => (
+            <button
+              key={o}
+              onClick={() => submit(o, true)}
+              disabled={disabled}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[13px] text-slate-800 hover:border-brand-600 hover:text-brand-700 disabled:opacity-50"
+            >
+              {o}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit(value);
+          }}
+          className="mt-2 flex items-center gap-2"
+        >
+          <span className="flex min-w-0 flex-1 items-center rounded-md border border-slate-300 bg-white focus-within:border-brand-600 focus-within:ring-2 focus-within:ring-brand-600/15">
+            <input
+              type={f.type}
+              min={f.type === "number" ? 0 : undefined}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              aria-label={ask.question}
+              autoFocus
+              className="tnum w-full min-w-0 bg-transparent px-2.5 py-1.5 text-sm focus:outline-none"
+            />
+            {f.unit && <span className="shrink-0 pr-2.5 text-xs text-slate-400">{f.unit}</span>}
+          </span>
+          <button
+            type="submit"
+            disabled={disabled || !value.trim()}
+            className="shrink-0 rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            답하기
+          </button>
+        </form>
+      )}
     </div>
   );
 }
@@ -2762,12 +2985,14 @@ function AnswerPanel({
   card,
   sites,
   onOpen,
+  onUpdate,
 }: {
   question: string;
   msg: Message;
   card: AnswerCard;
   sites: Site[];
   onOpen: (policyIndex: number, view: View) => void;
+  onUpdate: (p: Partial<Message>) => void;
 }) {
   const [done, setDone] = useState<Record<number, boolean>>({});
   const traces = msg.traces || [];
@@ -2797,6 +3022,8 @@ function AnswerPanel({
           </div>
         )}
       </Card>
+
+      <ActionOutputs msg={msg} onUpdate={onUpdate} />
 
       {policies.length > 0 && (
         <div className="space-y-3">
@@ -3142,7 +3369,7 @@ function PolicyAudit({
           }
         />
         <p className="px-4 pb-3 text-xs text-slate-500">
-          Gemini가 판독합니다. 텍스트 서류는 주민번호 등을 가린 뒤 보내고, 이미지·PDF는 원본이 전송됩니다. 서버에 저장하지 않습니다.
+          AI가 판독합니다. 텍스트 서류는 주민번호 등을 가린 뒤 보내고, 이미지·PDF는 원본이 전송됩니다. 서버에 저장하지 않습니다.
         </p>
       </Card>
       {st.audit ? (
@@ -3315,6 +3542,107 @@ function PanelTabs({
         </button>
       ))}
     </div>
+  );
+}
+
+// AI가 만든 제출 직전 체크리스트와 제출용 초안. 체크와 수정 내용은 대화 기록에 함께 저장된다.
+function ActionOutputs({ msg, onUpdate }: { msg: Message; onUpdate: (p: Partial<Message>) => void }) {
+  const [copied, setCopied] = useState(false);
+  const { draft, checklist } = msg;
+  if (!draft && !checklist) return null;
+  const doneN = checklist ? checklist.items.filter((x) => x.done).length : 0;
+  const blanks = draft ? (draft.text.match(/\[[^\]]+\]/g) || []).length : 0;
+
+  const download = () => {
+    if (!draft) return;
+    const url = URL.createObjectURL(new Blob([draft.text], { type: "text/plain;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `공고패스_${(draft.policyName || "정책").replace(/\s+/g, "_")}_${draft.title.replace(/\s+/g, "_")}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <>
+      {checklist && (
+        <Card target="action-checklist">
+          <CardHead
+            title="제출 직전 체크리스트"
+            desc={`${doneN} / ${checklist.items.length} 완료${checklist.policyName ? ` · ${checklist.policyName}` : ""}`}
+          />
+          <ul className="divide-y divide-slate-100">
+            {checklist.items.map((x, i) => (
+              <li key={i}>
+                <label className="flex cursor-pointer items-start gap-3 px-4 py-2.5 text-[13px] hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(x.done)}
+                    onChange={() =>
+                      onUpdate({
+                        checklist: { ...checklist, items: checklist.items.map((y, j) => (j === i ? { ...y, done: !y.done } : y)) },
+                      })
+                    }
+                    className="mt-0.5 h-4 w-4 accent-brand-600"
+                  />
+                  <span className="min-w-0">
+                    <span className={x.done ? "text-slate-400 line-through" : "font-medium text-slate-900"}>
+                      <span className="tnum mr-1.5 text-slate-400">{i + 1}</span>
+                      {x.task}
+                    </span>
+                    {x.detail && <span className="mt-0.5 block text-xs text-slate-500">{x.detail}</span>}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {draft && (
+        <Card target="action-draft">
+          <CardHead
+            title={`${draft.title} 초안`}
+            desc={draft.purpose || draft.policyName}
+            action={
+              <div className="flex shrink-0 gap-1.5">
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(draft.text);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                  {copied ? "복사됨" : "복사"}
+                </button>
+                <button
+                  onClick={download}
+                  className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <Download className="h-3 w-3" />
+                  .txt
+                </button>
+              </div>
+            }
+          />
+          <div className="space-y-2 p-4">
+            <textarea
+              value={draft.text}
+              onChange={(e) => onUpdate({ draft: { ...draft, text: e.target.value } })}
+              rows={14}
+              aria-label={`${draft.title} 초안`}
+              className="block w-full rounded-md border border-slate-300 bg-white p-3 text-[13px] leading-relaxed focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/15"
+            />
+            <p className="text-xs text-slate-500">
+              AI가 쓴 초안입니다. {blanks ? `[ ]로 비워 둔 ${blanks}곳을 직접 채우고, ` : ""}사실과 다른 내용이 없는지 확인한 뒤 제출하세요. ·{" "}
+              <span className="tnum">{draft.text.length.toLocaleString("ko-KR")}자</span>
+            </p>
+          </div>
+        </Card>
+      )}
+    </>
   );
 }
 
