@@ -139,6 +139,32 @@ label:active {
   transition: transform 380ms var(--ease-out), width 380ms var(--ease-out), opacity 200ms ease;
 }
 
+/* AI 에이전트 오버레이 연출 (스캔 라인, 빨간 네모 하이라이트, 클릭 파동) */
+@keyframes agent-scan {
+  0% { top: -8%; opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { top: 108%; opacity: 0; }
+}
+@keyframes agent-ripple {
+  0% { transform: translate(-50%, -50%) scale(0.25); opacity: 0.9; }
+  100% { transform: translate(-50%, -50%) scale(2.8); opacity: 0; }
+}
+@keyframes target-box-in {
+  0% { opacity: 0; transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.animate-agent-scan {
+  animation: agent-scan 1.7s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.animate-agent-ripple {
+  animation: agent-ripple 720ms var(--ease-out) forwards;
+}
+.animate-target-box {
+  animation: target-box-in 260ms var(--ease-out) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

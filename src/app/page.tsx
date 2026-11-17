@@ -25,6 +25,7 @@ import { POLICY_SCENARIOS } from "@/data/policies";
 import type { ToolExecution, ToolSource } from "@/lib/tools";
 import type { AuditResult } from "@/lib/docRules";
 import type { AnswerCard, PolicyDetail } from "@/lib/card";
+import { AgentOverlay, type AgentPlanStep, type AgentTarget } from "@/components/AgentOverlay";
 
 const policy = POLICY_SCENARIOS[0];
 const form = policy.applicationFormTemplate;
@@ -242,6 +243,19 @@ export default function Page() {
   const [facts, setFacts] = useState<Record<string, PolicyDetail & { at: number }>>({});
   const endRef = useRef<HTMLDivElement>(null);
 
+  // AI 에이전트 시각적 연출(플랜 HUD, 가상 커서, 빨간 네모 하이라이트, 스캔 라인, 긴급 중지)
+  const [agentActive, setAgentActive] = useState(false);
+  const [agentPaused, setAgentPaused] = useState(false);
+  const [agentScanning, setAgentScanning] = useState(false);
+  const [agentSteps, setAgentSteps] = useState<AgentPlanStep[]>([]);
+  const [agentThought, setAgentThought] = useState("");
+  const [agentTarget, setAgentTarget] = useState<AgentTarget | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const pausedRef = useRef(false);
+  const stoppedRef = useRef(false);
+  const agentTimersRef = useRef<number[]>([]);
+  const pendingMsgIdRef = useRef<string | null>(null);
+
   const allTools = [...CATALOG, ...custom];
   const focusMsg = messages.find((m) => m.id === focusId && m.card);
   const allPolicyOptions = messages.flatMap((m) =>
@@ -304,12 +318,17 @@ export default function Page() {
   const display = (v: string) =>
     maskOnScreen ? v.replace(/(\d{6})-([1-4])\d{6}/g, "$1-$2******") : v;
 
-  const fetchTools = async (p: Profile = profile, mode: "defect" | "fixed" = auditMode === "fixed" ? "fixed" : "defect") => {
+  const fetchTools = async (
+    p: Profile = profile,
+    mode: "defect" | "fixed" = auditMode === "fixed" ? "fixed" : "defect",
+    signal?: AbortSignal
+  ) => {
     setToolsLoading(true);
     try {
       const res = await fetch("/api/agent/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify({
           age: p.age,
           region: REGION,
@@ -486,6 +505,83 @@ export default function Page() {
     }[key];
   };
 
+  const clearAgentTimers = () => {
+    agentTimersRef.current.forEach((t) => window.clearTimeout(t));
+    agentTimersRef.current = [];
+  };
+
+  const stopAgent = () => {
+    stoppedRef.current = true;
+    pausedRef.current = false;
+    clearAgentTimers();
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (pendingMsgIdRef.current) {
+      patch(pendingMsgIdRef.current, { content: "사용자에 의해 작업이 중지되었습니다." });
+      pendingMsgIdRef.current = null;
+    }
+    setWorking(false);
+    setAgentActive(false);
+    setAgentPaused(false);
+    setAgentScanning(false);
+    setAgentTarget(null);
+  };
+
+  const toggleAgentPause = () => {
+    const next = !pausedRef.current;
+    pausedRef.current = next;
+    setAgentPaused(next);
+  };
+
+  const waitWhilePaused = async () => {
+    while (pausedRef.current && !stoppedRef.current) {
+      await new Promise((r) => setTimeout(r, 120));
+    }
+  };
+
+  const startAgentPlan = (labels: string[], thoughts: string[], scan = false) => {
+    clearAgentTimers();
+    stoppedRef.current = false;
+    pausedRef.current = false;
+    setAgentPaused(false);
+    setAgentActive(true);
+    setAgentScanning(scan);
+    setAgentTarget(null);
+    setAgentSteps(labels.map((label, i) => ({ label, status: i === 0 ? "active" : "pending" })));
+    setAgentThought(thoughts[0] || "");
+
+    labels.slice(1).forEach((_, idx) => {
+      const stepIndex = idx + 1;
+      const t = window.setTimeout(() => {
+        if (stoppedRef.current) return;
+        setAgentSteps((prev) =>
+          prev.map((s, i) => ({
+            ...s,
+            status: i < stepIndex ? "done" : i === stepIndex ? "active" : "pending",
+          }))
+        );
+        if (thoughts[stepIndex]) setAgentThought(thoughts[stepIndex]);
+      }, stepIndex * 750);
+      agentTimersRef.current.push(t);
+    });
+  };
+
+  const finishAgentWithTarget = (finalThought: string, target?: { selector: string; label: string } | null) => {
+    if (stoppedRef.current) return;
+    clearAgentTimers();
+    setAgentScanning(false);
+    setAgentSteps((prev) => prev.map((s) => ({ ...s, status: "done" })));
+    setAgentThought(finalThought);
+    if (target) {
+      setAgentTarget({ ...target, id: Date.now() });
+    }
+    const hideTimer = window.setTimeout(() => {
+      setAgentTarget(null);
+      setAgentActive(false);
+    }, 3400);
+    agentTimersRef.current.push(hideTimer);
+  };
+
   const runMission = async (key: MissionKey) => {
     if (working) return;
     const m = MISSIONS[key];
@@ -500,12 +596,79 @@ export default function Page() {
         ? ["주민등록등본.pdf", "임대차계약서.jpg", "가족관계증명서.pdf"]
         : undefined,
     });
+    pendingMsgIdRef.current = id;
     setExpanded((e) => ({ ...e, [id]: true }));
 
-    const data = await fetchTools(profile, m.mode ?? (auditMode === "fixed" ? "fixed" : "defect"));
-    await new Promise((r) => setTimeout(r, 450));
+    const planConfig: Record<MissionKey, { labels: string[]; thoughts: string[]; scan: boolean; target: { selector: string; label: string } }> = {
+      triage: {
+        labels: ["공고 조건 분석", "소득·월세 환산", "특례 조항 판정"],
+        thoughts: [
+          "신청자 연령과 별도 거주 기간을 공고문 기준으로 대조합니다.",
+          "보증금 연 5.5% 환산액과 월세를 합산해 상한 요건을 계산합니다.",
+          "18p [별표2] 제3호 독립가구 특례 적용 여부를 확정합니다.",
+        ],
+        scan: false,
+        target: { selector: "triage-verdict", label: "핵심 자격 판정" },
+      },
+      recipe: {
+        labels: ["판정 조건 대조", "필수 서류 선별", "발급 옵션 정리"],
+        thoughts: [
+          "전체 12종 서류 중 현재 조건에서 면제되는 서류를 제외합니다.",
+          "주민등록등본·가족관계증명서·임대차계약서 필수 4종을 추립니다.",
+          "반려를 막기 위한 발급 체크박스 옵션을 정리합니다.",
+        ],
+        scan: false,
+        target: { selector: "recipe-docs", label: "필수 발급 서류" },
+      },
+      audit_defect: {
+        labels: ["서류 3종 스캔", "규칙·발급일 점검", "교차 검증 리포트"],
+        thoughts: [
+          "첨부된 예시 서류 세트 A의 텍스트와 직인 영역을 스캔합니다.",
+          "전입일·상세 증명서·확정일자 등 반려 유발 항목을 검사합니다.",
+          "등본과 임대차계약서의 주소·성명 일치 여부를 교차 검증합니다.",
+        ],
+        scan: true,
+        target: { selector: "audit-risk", label: "반려 위험 적발" },
+      },
+      audit_fixed: {
+        labels: ["보완 서류 재스캔", "신청서 자동 기입", "계획서 금칙어 점검"],
+        thoughts: [
+          "보완된 예시 서류 세트 B를 다시 스캔해 미비점이 없는지 확인합니다.",
+          "검증된 서류 값으로 복지로 신청서 항목을 자동으로 채웁니다.",
+          "계획서 초안의 금칙어와 권장 키워드 포함 여부를 점검합니다.",
+        ],
+        scan: true,
+        target: { selector: "package-form", label: "신청서 자동 기입" },
+      },
+      all: {
+        labels: ["자격 요건 계산", "서류 선별", "서류 사전 검수", "신청 패키지 구성"],
+        thoughts: [
+          "입력 조건으로 중위소득 비율과 환산 합산 월세를 계산합니다.",
+          "조건에 맞는 필수 서류 4종과 면제 서류를 분류합니다.",
+          "예시 서류 세트 A를 스캔해 반려 위험 4건을 사전 탐지합니다.",
+          "도구 9개 실행 결과와 출처를 실행 내역 패널에 정리합니다.",
+        ],
+        scan: true,
+        target: { selector: "tools-list", label: "9개 도구 실행 내역" },
+      },
+    };
+
+    const cfg = planConfig[key];
+    startAgentPlan(cfg.labels, cfg.thoughts, cfg.scan);
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    const data = await fetchTools(profile, m.mode ?? (auditMode === "fixed" ? "fixed" : "defect"), ac.signal);
+    await new Promise((r) => setTimeout(r, 650));
+    await waitWhilePaused();
+
+    if (stoppedRef.current) return;
+    pendingMsgIdRef.current = null;
+
     if (!data.tools || !data.summary) {
       patch(id, { content: "도구 실행에 실패했습니다. 서버 상태를 확인한 뒤 다시 시도하세요.", error: true });
+      setAgentActive(false);
+      setAgentScanning(false);
     } else {
       const copy = missionCopy(key, data.summary, profile);
       const next: Record<MissionKey, MissionKey[]> = {
@@ -523,6 +686,7 @@ export default function Page() {
         artifact: { view: m.view, title: copy.title, meta: copy.meta },
         followUps: next[key],
       });
+      finishAgentWithTarget(`${copy.title} 정리 완료 — 강조된 영역을 확인하세요.`, cfg.target);
     }
     setWorking(false);
     scrollDown();
@@ -570,13 +734,41 @@ export default function Page() {
     }
     const auditFor = active; // 보낸 시점의 기준 정책
     const id = pushTurn({ content: text, attachments: files.map((f) => f.fileName) });
+    pendingMsgIdRef.current = id;
+
+    const isAudit = Boolean(files.length && (!typed || /검수|점검|반려/.test(text)));
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    if (isAudit) {
+      startAgentPlan(
+        ["첨부 서류 스캔", "필수 항목 판독", "교차 검증 리포트"],
+        [
+          `첨부된 서류 ${files.length}건의 텍스트·이미지를 스캔합니다.`,
+          "전입일, 확정일자, 상세 증명서 등 접수 기준을 대조합니다.",
+          "서류 간 성명·주소 일치 여부를 교차 검증합니다.",
+        ],
+        true
+      );
+    } else {
+      startAgentPlan(
+        ["질문 의도 분석", "정책·등록 사이트 탐색", "근거 카드 정리"],
+        [
+          "질문 내용에서 대상 정책과 조건 키워드를 추출합니다.",
+          "등록된 정부 사이트 및 공고 기준을 검색해 확인합니다.",
+          "핵심 조건과 신청 단계를 한눈에 볼 수 있게 정리합니다.",
+        ],
+        files.length > 0
+      );
+    }
 
     try {
       // 첨부만 보내거나 검수를 요청하면 서류 검수, 질문을 함께 쓰면 첨부 문서 기반 답변
-      if (files.length && (!typed || /검수|점검|반려/.test(text))) {
+      if (isAudit) {
         const res = await fetch("/api/agent/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: ac.signal,
           body: JSON.stringify({
             action: "ocr_audit_docs",
             apiKey: geminiKey,
@@ -586,8 +778,13 @@ export default function Page() {
           }),
         });
         const data = await res.json();
+        await waitWhilePaused();
+        if (stoppedRef.current) return;
+        pendingMsgIdRef.current = null;
         if (!res.ok || !data.auditResult) {
           patch(id, { content: data.message || "서류 검수에 실패했습니다.", error: true });
+          setAgentActive(false);
+          setAgentScanning(false);
           return;
         }
         const result: AuditResult = data.auditResult;
@@ -619,12 +816,17 @@ export default function Page() {
             meta: `${engine} · 반려 위험 ${n}건`,
           },
         });
+        finishAgentWithTarget(
+          n ? `반려 위험 ${n}건을 찾았습니다. 빨간 표시 영역을 확인하세요.` : "서류 검수 완료 — 반려 위험이 없습니다.",
+          { selector: "audit-risk", label: n ? `반려 위험 ${n}건` : "검수 완료" }
+        );
         return;
       }
 
       const res = await fetch("/api/agent/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: ac.signal,
         body: JSON.stringify({
           action: "agent_chat",
           apiKey: geminiKey,
@@ -655,8 +857,14 @@ export default function Page() {
         }),
       });
       const data = await res.json();
+      await waitWhilePaused();
+      if (stoppedRef.current) return;
+      pendingMsgIdRef.current = null;
+
       if (!res.ok || !data.reply) {
         patch(id, { content: data.message || "답변을 만들지 못했습니다.", error: true });
+        setAgentActive(false);
+        setAgentScanning(false);
         return;
       }
       const eligibility = data.kind === "eligibility";
@@ -692,8 +900,19 @@ export default function Page() {
           followUps: ["recipe", "audit_defect"] as MissionKey[],
         }),
       });
-    } catch {
+      if (eligibility) {
+        finishAgentWithTarget("자격 판정 결과를 패널에 정리했습니다.", { selector: "triage-verdict", label: "자격 판정 결과" });
+      } else if (data.card && window.innerWidth >= 1024) {
+        finishAgentWithTarget("답변 근거와 출처를 정리했습니다.", { selector: "answer-summary", label: "답변 핵심 근거" });
+      } else {
+        finishAgentWithTarget("답변 정리를 완료했습니다.", null);
+      }
+    } catch (err) {
+      if (stoppedRef.current || (err instanceof DOMException && err.name === "AbortError")) return;
+      pendingMsgIdRef.current = null;
       patch(id, { content: "요청을 처리하지 못했습니다. 네트워크 상태를 확인하세요.", error: true });
+      setAgentActive(false);
+      setAgentScanning(false);
     } finally {
       setWorking(false);
       scrollDown();
@@ -822,6 +1041,16 @@ export default function Page() {
 
   return (
     <div className="h-dvh w-screen overflow-hidden antialiased text-slate-800 selection:bg-brand-100 selection:text-brand-700">
+      <AgentOverlay
+        active={agentActive}
+        paused={agentPaused}
+        scanning={agentScanning}
+        steps={agentSteps}
+        thought={agentThought}
+        target={agentTarget}
+        onTogglePause={toggleAgentPause}
+        onStop={stopAgent}
+      />
       <div className="flex h-full w-full overflow-hidden bg-white">
         {/* ───────── 사이드바 ───────── */}
         <aside
@@ -1399,7 +1628,7 @@ export default function Page() {
                   </div>
                 </Card>
 
-                <Card>
+                <Card target="tools-list">
                   <CardHead
                     title={`도구 실행 ${tools.length}건`}
                     desc={`실계산 ${tools.filter((t) => t.source === "calc").length} · 예시 데이터 ${tools.filter((t) => t.source === "sample").length} · 실시간 API ${tools.filter((t) => t.source === "live").length}`}
@@ -1418,7 +1647,10 @@ export default function Page() {
               <>
                 {summary ? (
                   <>
-                    <div className={`rounded-2xl border px-4 py-3.5 shadow-sm ${VERDICT[summary.verdict].cls}`}>
+                    <div
+                      data-agent-target="triage-verdict"
+                      className={`rounded-2xl border px-4 py-3.5 shadow-sm ${VERDICT[summary.verdict].cls}`}
+                    >
                       <div className="text-sm font-semibold">{VERDICT[summary.verdict].title}</div>
                       <div className="mt-0.5 text-[13px] opacity-90">{VERDICT[summary.verdict].body}</div>
                     </div>
@@ -1544,7 +1776,7 @@ export default function Page() {
             {/* 발급 가이드 */}
             {view === "recipe" && !active && (
               <>
-                <Card>
+                <Card target="recipe-docs">
                   <CardHead
                     title={`준비할 서류 ${requiredDocs.length}종`}
                     desc={`발급 완료 ${requiredDocs.filter((d) => doneDocs[d.id]).length} / ${requiredDocs.length}`}
@@ -1670,7 +1902,7 @@ export default function Page() {
                   </div>
                 )}
 
-                <Card>
+                <Card target="package-form">
                   <CardHead
                     title="신청서 자동 기입"
                     desc={form.formTitle}
@@ -2452,7 +2684,7 @@ function AnswerPanel({
   const policies = card.policies || []; // 이전 버전에 저장된 답변에는 없음
   return (
     <>
-      <Card>
+      <Card target="answer-summary">
         <div className="px-4 py-3.5">
           <div className="text-xs text-slate-500">질문</div>
           <div className="mt-0.5 text-[13px] text-slate-800">{question}</div>
@@ -2563,6 +2795,7 @@ function AuditReport({
   return (
     <>
                 <div
+                  data-agent-target="audit-risk"
                   className={`flex items-center gap-3 rounded-2xl border px-4 py-3.5 shadow-sm ${
                     auditRisks ? "border-red-200 bg-red-50 text-red-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"
                   }`}
@@ -3075,9 +3308,12 @@ function PanelTabs({
   );
 }
 
-function Card({ children }: { children: React.ReactNode }) {
+function Card({ children, target }: { children: React.ReactNode; target?: string }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[border-color,box-shadow] duration-300 hover:border-purple-200/70 hover:shadow-[0_8px_24px_-14px_rgba(126,34,206,0.25)]">
+    <section
+      data-agent-target={target}
+      className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[border-color,box-shadow] duration-300 hover:border-purple-200/70 hover:shadow-[0_8px_24px_-14px_rgba(126,34,206,0.25)]"
+    >
       {children}
     </section>
   );
