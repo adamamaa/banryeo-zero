@@ -1,4 +1,4 @@
-export const GEMINI_MODEL = "gemini-4-hydrogen";
+export const GEMINI_MODEL = "gemini-3.8-flash";
 
 // 키는 URL이 아니라 헤더로 보낸다 (URL 쿼리는 서버·프록시 로그에 남는다).
 export function callGemini(apiKey: string, body: Record<string, unknown>) {
@@ -36,6 +36,21 @@ export async function geminiParse(res: Response): Promise<{ text: string; source
 }
 
 export const geminiText = async (res: Response) => (await geminiParse(res)).text;
+
+// 실패 응답을 사용자가 조치할 수 있는 문장으로 바꾼다.
+export async function geminiError(res: Response): Promise<string> {
+  const msg = String((await res.json().catch(() => null))?.error?.message || "");
+  if (res.status === 429 && /spend(ing)? cap/i.test(msg))
+    return "Gemini 월 지출 한도를 초과했습니다. AI Studio(https://ai.studio/spend)에서 한도를 올리세요.";
+  if (res.status === 429) return "Gemini 요청 한도를 초과했습니다. 잠시 후 다시 시도하세요.";
+  if (res.status === 404) return `모델 '${GEMINI_MODEL}'을 찾을 수 없습니다. src/lib/gemini.ts의 모델명을 확인하세요.`;
+  if (res.status === 400 && /api key/i.test(msg)) return "Gemini API 키가 올바르지 않습니다. 키를 다시 확인하세요.";
+  if (res.status === 401 || res.status === 403) return "Gemini API 키 권한이 없습니다. 키와 프로젝트 설정을 확인하세요.";
+  return `Gemini 호출 실패 (${res.status})`;
+}
+
+// 재시도해도 결과가 같은 오류 (한도·인증·모델명)
+export const isFatalGeminiStatus = (s: number) => [401, 403, 404, 429].includes(s);
 
 export function maskPii(text: string) {
   let count = 0;

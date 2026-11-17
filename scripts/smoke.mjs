@@ -25,25 +25,40 @@ assert.equal(over.summary.verdict, "ineligible"); // 78% > 60%
 const young = await post("/api/agent/execute", { separateLivingMonths: 6 });
 assert.equal(young.summary.verdict, "needs_parent_check");
 
+const serverHasKey = (await post("/api/agent/run", { action: "ping" })).connected;
+
 const a = await post("/api/agent/run", { action: "ocr_audit_docs", uploadedDocs: set("A_미비세트") });
-assert.equal(a.mode, "local_rules");
-assert.equal(risks(a).length, 5, JSON.stringify(risks(a).map((f) => f.title)));
+// 규칙 엔진 수치는 키가 없을 때만 검사 (키가 있으면 Gemini 판독으로 감)
+if (!serverHasKey) {
+  assert.equal(a.mode, "local_rules");
+  assert.equal(risks(a).length, 5, JSON.stringify(risks(a).map((f) => f.title)));
+} else {
+  assert.ok(risks(a).length >= 1, "미비 세트에서 위험을 못 찾음");
+}
 assert.ok(!JSON.stringify(a).includes("1234567"), "주민번호 뒷자리가 마스킹되지 않음");
 
-const b = await post("/api/agent/run", { action: "ocr_audit_docs", uploadedDocs: set("B_보완세트") });
-assert.equal(risks(b).length, 0, JSON.stringify(risks(b).map((f) => f.title)));
-assert.ok(b.auditResult.crossCheckMatrix.every((m) => m.status === "pass"));
+if (!serverHasKey) {
+  const b = await post("/api/agent/run", { action: "ocr_audit_docs", uploadedDocs: set("B_보완세트") });
+  assert.equal(risks(b).length, 0, JSON.stringify(risks(b).map((f) => f.title)));
+  assert.ok(b.auditResult.crossCheckMatrix.every((m) => m.status === "pass"));
+}
 
 // 키 없는 채팅: 월세 조건 질문은 자격 계산, 그 밖의 질문은 일반 답변 경로
 const chat = (userMessage) => post("/api/agent/run", { action: "agent_chat", apiKey: "", userMessage });
-if (!process.env.GEMINI_API_KEY) {
+if (!serverHasKey) {
   const rent = await chat("월세가 70만 원을 넘어도 받을 수 있나요?");
   assert.equal(rent.kind, "eligibility");
   assert.equal(rent.summary.medianRatioPercent, 50.7);
   const general = await chat("국민취업지원제도는 누가 신청할 수 있나요?");
+  assert.equal(general.card, undefined);
   assert.equal(general.kind, "general");
   assert.equal(general.needsKey, true);
   assert.equal(general.summary, undefined);
+} else {
+  // 키가 있으면 일반 질문은 카드로 답한다
+  const general = await chat("국민취업지원제도는 누가 신청할 수 있나요?");
+  assert.equal(general.kind, "general");
+  assert.ok(general.card?.summary, general.reply);
 }
 
 console.log("smoke ok");

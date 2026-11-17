@@ -24,11 +24,12 @@ import {
 import { POLICY_SCENARIOS } from "@/data/policies";
 import type { ToolExecution, ToolSource } from "@/lib/tools";
 import type { AuditResult } from "@/lib/docRules";
+import type { AnswerCard, PolicyDetail } from "@/lib/card";
 
 const policy = POLICY_SCENARIOS[0];
 const form = policy.applicationFormTemplate;
 
-type View = "tools" | "triage" | "recipe" | "audit" | "package";
+type View = "answer" | "tools" | "triage" | "recipe" | "audit" | "package";
 type MissionKey = "all" | "triage" | "recipe" | "audit_defect" | "audit_fixed";
 type AuditMode = "defect" | "fixed" | "upload";
 type Verdict = "eligible" | "needs_parent_check" | "ineligible";
@@ -62,6 +63,7 @@ interface Message {
   artifact?: { view: View; title: string; meta: string };
   followUps?: MissionKey[];
   sources?: { title: string; url: string; registered?: boolean }[];
+  card?: AnswerCard;
 }
 
 interface Staged {
@@ -215,7 +217,6 @@ export default function Page() {
   const [tools, setTools] = useState<ToolExecution[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [toolsLoading, setToolsLoading] = useState(false);
-  const [openTool, setOpenTool] = useState<number | null>(3);
 
   const [auditMode, setAuditMode] = useState<AuditMode>("defect");
   const [upload, setUpload] = useState<{ result: AuditResult; mode: string; note?: string } | null>(null);
@@ -230,9 +231,38 @@ export default function Page() {
   const [staged, setStaged] = useState<Staged[]>([]);
   const [working, setWorking] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // 오른쪽 패널 '답변 근거' 탭이 보여주는 답변
+  const [focusId, setFocusId] = useState<string | null>(null);
+  // 패널 탭들의 기준 정책: "demo"(청년월세 시연 공고) 또는 "메시지id#정책순번"
+  const [ctx, setCtx] = useState("demo");
+  // 정책별 자격 응답·서류 준비·검수 결과 (브라우저에 저장)
+  const [policyState, setPolicyState] = useState<Record<string, PolicyState>>({});
+  // 이전에 안내한 정책 정보. 다음 질문에 함께 보내 같은 정책은 같은 값으로 답하게 한다.
+  const [facts, setFacts] = useState<Record<string, PolicyDetail & { at: number }>>({});
   const endRef = useRef<HTMLDivElement>(null);
 
   const allTools = [...CATALOG, ...custom];
+  const focusMsg = messages.find((m) => m.id === focusId && m.card);
+  const allPolicyOptions = messages.flatMap((m) =>
+    (m.card?.policies || []).map((p, i) => ({ key: `${m.id}#${i}`, msgId: m.id, p, steps: m.card!.steps, links: m.card!.links }))
+  );
+  const active = allPolicyOptions.find((o) => o.key === ctx) || null;
+  // 같은 정책을 여러 번 물었으면 선택지에는 가장 최근 것만 (현재 선택은 유지)
+  const policyOptions = allPolicyOptions.filter(
+    (o, i, a) => a.findLastIndex((x) => x.p.name === o.p.name) === i || o.key === ctx
+  );
+  const pst: PolicyState = active ? policyState[active.key] || {} : {};
+  const setPst = (patch: Partial<PolicyState>) => {
+    if (active) setPolicyState((s) => ({ ...s, [active.key]: { ...s[active.key], ...patch } }));
+  };
+  const linkedMsg = active ? messages.find((m) => m.id === active.msgId) : undefined;
+  const choosePolicy = (key: string, v?: View) => {
+    setCtx(key);
+    const o = allPolicyOptions.find((x) => x.key === key);
+    if (o) setFocusId(o.msgId);
+    if (v) setView(v);
+    setCanvasOpen(true);
+  };
   const myTools = allTools.filter((t) => addedIds.includes(t.id));
 
   const newChat = () => {
@@ -337,9 +367,27 @@ export default function Page() {
       setCustom(safe);
       setAddedIds(saved.added || DEFAULT_TOOLS);
     }
+    setPolicyState(loadLocal<Record<string, PolicyState>>("gonggopass_policy_state", {}));
+    // 30일 지난 정책 정보는 버린다 (정책이 바뀌었을 수 있음)
+    const month = Date.now() - 30 * 24 * 3600 * 1000;
+    setFacts(
+      Object.fromEntries(
+        Object.entries(loadLocal<Record<string, PolicyDetail & { at: number }>>("gonggopass_policy_facts", {})).filter(
+          ([, v]) => v.at > month
+        )
+      )
+    );
     setLoaded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (loaded) localStorage.setItem("gonggopass_policy_state", JSON.stringify(policyState));
+  }, [policyState, loaded]);
+
+  useEffect(() => {
+    if (loaded) localStorage.setItem("gonggopass_policy_facts", JSON.stringify(facts));
+  }, [facts, loaded]);
 
   useEffect(() => {
     if (loaded) localStorage.setItem("gonggopass_chats", JSON.stringify(chats));
@@ -440,6 +488,7 @@ export default function Page() {
   const runMission = async (key: MissionKey) => {
     if (working) return;
     const m = MISSIONS[key];
+    setCtx("demo");
     if (m.mode) setAuditMode(m.mode);
     const s0 = summary;
     const copy0 = s0 ? missionCopy(key, s0, profile) : null;
@@ -478,41 +527,62 @@ export default function Page() {
     scrollDown();
   };
 
-  const onFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    Array.from(e.target.files || []).forEach((file) => {
-      const binary = file.type.startsWith("image/") || file.type === "application/pdf";
-      const reader = new FileReader();
-      reader.onload = () =>
-        setStaged((prev) => [
-          ...prev,
-          {
-            fileName: file.name,
-            mimeType: binary ? file.type : "text/plain",
-            base64OrText: String(reader.result || ""),
-          },
-        ]);
-      if (binary) reader.readAsDataURL(file);
-      else reader.readAsText(file, "utf-8");
-    });
-    e.target.value = "";
+  const readFiles = (list: FileList | null) =>
+    Promise.all(
+      Array.from(list || []).map(
+        (file) =>
+          new Promise<Staged>((resolve) => {
+            const binary = file.type.startsWith("image/") || file.type === "application/pdf";
+            const reader = new FileReader();
+            reader.onload = () =>
+              resolve({ fileName: file.name, mimeType: binary ? file.type : "text/plain", base64OrText: String(reader.result || "") });
+            if (binary) reader.readAsDataURL(file);
+            else reader.readAsText(file, "utf-8");
+          })
+      )
+    );
+
+  const onFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const el = e.target;
+    const files = await readFiles(el.files);
+    setStaged((prev) => [...prev, ...files]);
+    el.value = "";
   };
 
-  const send = async (e?: React.FormEvent) => {
+  // 패널 '사전 검수'에서 올린 서류는 채팅에도 남도록 같은 경로로 보낸다
+  const uploadForPolicy = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const el = e.target;
+    const files = await readFiles(el.files);
+    el.value = "";
+    if (files.length && active) send(undefined, `${active.p.name} 서류를 검수해 주세요.`, files);
+  };
+  // ask: 후속 질문 칩처럼 입력창을 거치지 않고 바로 보내는 질문, filesArg: 패널에서 올린 서류
+  const send = async (e?: React.FormEvent, ask?: string, filesArg?: Staged[]) => {
     e?.preventDefault();
-    if (working || (!input.trim() && !staged.length)) return;
-    const files = staged;
-    const text = input.trim() || `첨부한 서류 ${files.length}건을 제출 전에 검수해 주세요.`;
-    setInput("");
-    setStaged([]);
+    const typed = (ask ?? input).trim();
+    const files = filesArg ?? (ask ? [] : staged);
+    if (working || (!typed && !files.length)) return;
+    const text = typed || `첨부한 서류 ${files.length}건을 제출 전에 검수해 주세요.`;
+    if (!ask) {
+      setInput("");
+      setStaged([]);
+    }
+    const auditFor = active; // 보낸 시점의 기준 정책
     const id = pushTurn({ content: text, attachments: files.map((f) => f.fileName) });
 
     try {
       // 첨부만 보내거나 검수를 요청하면 서류 검수, 질문을 함께 쓰면 첨부 문서 기반 답변
-      if (files.length && (!input.trim() || /검수|점검|반려/.test(text))) {
+      if (files.length && (!typed || /검수|점검|반려/.test(text))) {
         const res = await fetch("/api/agent/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "ocr_audit_docs", apiKey: geminiKey, uploadedDocs: files }),
+          body: JSON.stringify({
+            action: "ocr_audit_docs",
+            apiKey: geminiKey,
+            uploadedDocs: files,
+            // 기준 정책이 있으면 그 정책의 서류·조건으로 검수
+            ...(auditFor && { policy: auditFor.p }),
+          }),
         });
         const data = await res.json();
         if (!res.ok || !data.auditResult) {
@@ -521,8 +591,12 @@ export default function Page() {
         }
         const result: AuditResult = data.auditResult;
         const n = risksOf(result);
-        setUpload({ result, mode: data.mode, note: data.note });
-        setAuditMode("upload");
+        if (auditFor) {
+          setPolicyState((s) => ({ ...s, [auditFor.key]: { ...s[auditFor.key], audit: result } }));
+        } else {
+          setUpload({ result, mode: data.mode, note: data.note });
+          setAuditMode("upload");
+        }
         setView("audit");
         setCanvasOpen(true);
         const engine = data.mode === "gemini" ? "Gemini 판독" : "규칙 엔진";
@@ -540,7 +614,7 @@ export default function Page() {
             `\n\n검수 방식: ${engine}${data.note ? ` · ${data.note}` : ""}${skipped}`,
           artifact: {
             view: "audit",
-            title: "업로드 서류 검수 리포트",
+            title: auditFor ? `${auditFor.p.name} 서류 검수` : "업로드 서류 검수 리포트",
             meta: `${engine} · 반려 위험 ${n}건`,
           },
         });
@@ -556,6 +630,15 @@ export default function Page() {
           publicDataApiKey: publicKey,
           userMessage: text,
           uploadedDocs: files,
+          knownPolicies: (() => {
+            // 질문이나 최근 대화에 이름이 나온 정책만 보낸다
+            const recent = (text + messages.slice(-4).map((m) => m.content).join(" ")).replace(/\s+/g, "");
+            return Object.entries(facts)
+              .filter(([k]) => recent.includes(k))
+              .sort((a, b) => b[1].at - a[1].at)
+              .slice(0, 8)
+              .map(([, { at: _at, ...p }]) => p); // eslint-disable-line @typescript-eslint/no-unused-vars
+          })(),
           history: messages
             .filter((m) => !m.pending && !m.error && m.content)
             .slice(-8)
@@ -579,6 +662,19 @@ export default function Page() {
       if (eligibility) {
         setView("triage");
         setCanvasOpen(true);
+      } else if (data.card) {
+        setFocusId(id);
+        setView("answer");
+        const ps: PolicyDetail[] = data.card.policies || [];
+        if (ps.length) {
+          setCtx(`${id}#0`);
+          setFacts((f) => ({
+            ...f,
+            ...Object.fromEntries(ps.map((p) => [p.name.replace(/\s+/g, ""), { ...p, at: Date.now() }])),
+          }));
+        }
+        // 넓은 화면에서만 자동으로 연다 (좁은 화면에선 패널이 채팅을 가린다)
+        if (window.innerWidth >= 1024) setCanvasOpen(true);
       }
       patch(id, {
         content:
@@ -586,9 +682,10 @@ export default function Page() {
           (data.needsKey
             ? "\n\n연결 설정에서 Gemini API 키를 넣으면 등록한 사이트를 검색해 질문 내용에 맞춰 답변합니다."
             : "") +
-          relatedLinks(text, data.reply),
+          (data.card ? "" : relatedLinks(text, data.reply)),
         traces: data.toolExecutions,
         sources: data.sources,
+        card: data.card || undefined,
         ...(eligibility && {
           artifact: { view: "triage" as View, title: "자격 판정 결과", meta: "입력 조건 기준 계산" },
           followUps: ["recipe", "audit_defect"] as MissionKey[],
@@ -804,7 +901,8 @@ export default function Page() {
                     ].map((q) => (
                       <button
                         key={q}
-                        onClick={() => setInput(q)}
+                        onClick={() => send(undefined, q)}
+                        disabled={working}
                         className="rounded-full border border-slate-300 px-3 py-1.5 text-[13px] text-slate-700 transition-colors hover:bg-slate-50"
                       >
                         {q}
@@ -838,15 +936,18 @@ export default function Page() {
                       </span>
                     </div>
                   ) : (
-                    <div key={msg.id} className="space-y-3">
+                    <div
+                      key={msg.id}
+                      className={`space-y-3 ${canvasOpen && view === "answer" && focusId === msg.id ? "-ml-4 border-l-2 border-brand-600 pl-[14px]" : ""}`}
+                    >
                       {msg.pending ? (
                         <div className="flex items-center gap-2 text-sm text-slate-500">
                           <LoaderCircle className="h-4 w-4 animate-spin" />
-                          확인하는 중입니다
+                          찾아보고 정리하는 중 · 보통 20초 안팎
                         </div>
                       ) : (
                         <>
-                          {msg.traces && msg.traces.length > 0 && (
+                          {!msg.card && msg.traces && msg.traces.length > 0 && (
                             <div className="rounded-lg border border-slate-200">
                               <button
                                 onClick={() => setExpanded((e) => ({ ...e, [msg.id]: !e[msg.id] }))}
@@ -875,15 +976,38 @@ export default function Page() {
                             </div>
                           )}
 
+                          {msg.card ? (
+                            <CardView card={msg.card} onAsk={(q) => send(undefined, q)} disabled={working} />
+                          ) : (
                           <div
                             className={`whitespace-pre-wrap text-sm leading-relaxed ${msg.error ? "rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-red-800" : "text-slate-800"}`}
                           >
                             <Rich text={msg.content} />
                           </div>
+                          )}
 
-                          {msg.sources && msg.sources.length > 0 && (
-                            <div>
-                              <div className="text-xs font-medium text-slate-500">출처</div>
+                          {msg.card && (
+                            <button
+                              onClick={() => {
+                                setFocusId(msg.id);
+                                if (msg.card?.policies?.length) setCtx(`${msg.id}#0`);
+                                setView("answer");
+                                setCanvasOpen(true);
+                              }}
+                              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-brand-700"
+                            >
+                              <PanelRight className="h-3.5 w-3.5" />
+                              근거 보기 · 도구 {msg.traces?.length || 0}건 · 출처 {msg.sources?.length || 0}곳
+                            </button>
+                          )}
+
+                          {!msg.card && msg.sources && msg.sources.length > 0 && (
+                            <details className="group">
+                              <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-slate-500 hover:text-slate-800">
+                                출처 {msg.sources.length}곳
+                                {msg.sources.some((s) => s.registered) && " · 내 도구 포함"}
+                                <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+                              </summary>
                               <ul className="mt-1.5 flex flex-wrap gap-1.5">
                                 {msg.sources.map((s) => (
                                   <li key={s.url}>
@@ -900,7 +1024,7 @@ export default function Page() {
                                   </li>
                                 ))}
                               </ul>
-                            </div>
+                            </details>
                           )}
 
                           {msg.artifact && (
@@ -1003,7 +1127,7 @@ export default function Page() {
         <section className="flex w-[48%] min-w-[420px] shrink-0 flex-col border-l border-slate-200 bg-slate-50 max-lg:fixed max-lg:inset-0 max-lg:z-30 max-lg:w-full max-lg:min-w-0">
           <div className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 bg-white pl-4 pr-2">
             <div role="tablist" className="flex h-full items-stretch gap-5 overflow-x-auto">
-              {VIEWS.map((v) => (
+              {(focusMsg ? [{ id: "answer" as View, label: "답변 근거" }, ...VIEWS] : VIEWS).map((v) => (
                 <button
                   key={v.id}
                   role="tab"
@@ -1025,8 +1149,61 @@ export default function Page() {
           </div>
 
           <div className="flex-1 space-y-4 overflow-y-auto p-5">
+            {view !== "answer" && policyOptions.length > 0 && (
+              <label className="flex items-center gap-2 text-xs text-slate-500">
+                <span className="shrink-0">기준 정책</span>
+                <select
+                  value={active ? active.key : "demo"}
+                  onChange={(e) => (e.target.value === "demo" ? setCtx("demo") : choosePolicy(e.target.value))}
+                  className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-[13px] text-slate-800 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/15"
+                >
+                  {policyOptions.map((o) => (
+                    <option key={o.key} value={o.key}>
+                      {o.p.name}
+                    </option>
+                  ))}
+                  <option value="demo">청년월세 지원 (시연 시나리오)</option>
+                </select>
+              </label>
+            )}
+
+            {active && view === "tools" && (
+              <Card>
+                <CardHead title={`도구 실행 ${linkedMsg?.traces?.length || 0}건`} desc={`'${active.p.name}' 답변을 만들 때 실행한 도구`} />
+                {linkedMsg?.traces?.length ? <ToolList tools={linkedMsg.traces} /> : <Empty text="실행한 도구가 없습니다." />}
+              </Card>
+            )}
+            {active && view === "triage" && (
+              <PolicyTriage p={active.p} st={pst} onChange={setPst} onAsk={(q) => send(undefined, q)} busy={working} />
+            )}
+            {active && view === "recipe" && (
+              <PolicyDocs p={active.p} st={pst} onChange={setPst} sites={myTools} onAsk={(q) => send(undefined, q)} busy={working} />
+            )}
+            {active && view === "audit" && (
+              <PolicyAudit p={active.p} st={pst} onUpload={uploadForPolicy} busy={working} display={display} />
+            )}
+            {active && view === "package" && (
+              <PolicyPackage p={active.p} st={pst} steps={active.steps} links={active.links} />
+            )}
+            {/* 답변 근거: 채팅에서 고른 답변의 도구·출처·체크리스트 */}
+            {view === "answer" &&
+              (focusMsg?.card ? (
+                <AnswerPanel
+                  key={focusMsg.id}
+                  question={messages[messages.indexOf(focusMsg) - 1]?.content || ""}
+                  msg={focusMsg}
+                  card={focusMsg.card}
+                  sites={myTools}
+                  onOpen={(i, v) => choosePolicy(`${focusMsg.id}#${i}`, v)}
+                />
+              ) : (
+                <Card>
+                  <Empty text="채팅 답변의 '근거 보기'를 누르면 여기에 표시됩니다." />
+                </Card>
+              ))}
+
             {/* 실행 내역 */}
-            {view === "tools" && (
+            {view === "tools" && !active && (
               <>
                 <Card>
                   <CardHead
@@ -1078,57 +1255,14 @@ export default function Page() {
                   {tools.length === 0 ? (
                     <Empty text={toolsLoading ? "도구를 실행하는 중입니다" : "실행 내역이 없습니다. 다시 계산을 눌러 주세요."} />
                   ) : (
-                    <ul className="divide-y divide-slate-100">
-                      {tools.map((t) => {
-                        const open = openTool === t.step;
-                        return (
-                          <li key={t.step}>
-                            <button
-                              onClick={() => setOpenTool(open ? null : t.step)}
-                              aria-expanded={open}
-                              className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
-                            >
-                              <span className="tnum w-4 text-xs text-slate-400">{t.step}</span>
-                              <StatusDot status={t.status} />
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-[13px] font-medium">{t.title}</span>
-                                <span className="block truncate text-xs text-slate-500">{t.basis}</span>
-                              </span>
-                              <SourceBadge source={t.source} />
-                              <ChevronDown
-                                className={`h-4 w-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
-                              />
-                            </button>
-                            {open && (
-                              <div className="grid gap-4 bg-slate-50 px-4 py-3 sm:grid-cols-2">
-                                <KeyValues title="입력" data={t.input} />
-                                <KeyValues title="결과" data={t.output} />
-                                <div className="flex items-center justify-between text-xs text-slate-500 sm:col-span-2">
-                                  <code className="font-mono">{t.toolName}</code>
-                                  {t.url && (
-                                    <a
-                                      href={t.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="flex items-center gap-1 hover:text-slate-800"
-                                    >
-                                      기관 페이지 <ExternalLink className="h-3 w-3" />
-                                    </a>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
+                    <ToolList tools={tools} />
                   )}
                 </Card>
               </>
             )}
 
             {/* 자격 판정 */}
-            {view === "triage" && (
+            {view === "triage" && !active && (
               <>
                 {summary ? (
                   <>
@@ -1256,7 +1390,7 @@ export default function Page() {
             )}
 
             {/* 발급 가이드 */}
-            {view === "recipe" && (
+            {view === "recipe" && !active && (
               <>
                 <Card>
                   <CardHead
@@ -1326,7 +1460,7 @@ export default function Page() {
             )}
 
             {/* 사전 검수 */}
-            {view === "audit" && (
+            {view === "audit" && !active && (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="inline-flex rounded-md border border-slate-300 bg-white p-0.5 text-[13px]">
@@ -1358,107 +1492,7 @@ export default function Page() {
                   )}
                 </div>
 
-                <div
-                  className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${
-                    auditRisks ? "border-red-200 bg-red-50 text-red-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"
-                  }`}
-                >
-                  {auditRisks ? <CircleAlert className="h-5 w-5 shrink-0" /> : <Check className="h-5 w-5 shrink-0" />}
-                  <div>
-                    <div className="text-sm font-semibold">
-                      {auditRisks ? `반려 위험 ${auditRisks}건` : "감지된 반려 위험 없음"}
-                    </div>
-                    <div className="text-[13px] opacity-90">
-                      {auditRisks
-                        ? "아래 항목을 보완한 뒤 제출하세요."
-                        : "점검한 기준 안에서의 결과이며 최종 판정은 접수 기관이 합니다."}
-                    </div>
-                  </div>
-                </div>
-
-                {auditRisks > 0 && (
-                  <Card>
-                    <CardHead title="보완할 항목" />
-                    <ol className="divide-y divide-slate-100">
-                      {audit.findings
-                        .filter((f) => f.severity !== "pass")
-                        .map((f, i) => (
-                          <li key={f.id} className="flex gap-3 p-4 text-[13px]">
-                            <span className="tnum grid h-5 w-5 shrink-0 place-items-center rounded-full bg-red-100 text-[11px] font-semibold text-red-700">
-                              {i + 1}
-                            </span>
-                            <div className="min-w-0 space-y-1.5">
-                              <div className="font-medium">{f.title.replace(/^\[[^\]]+\]\s*/, "")}</div>
-                              <p className="leading-relaxed text-slate-600">{f.detail}</p>
-                              <dl className="grid grid-cols-[4.5rem_1fr] gap-x-2 gap-y-1 text-xs">
-                                <dt className="text-slate-500">근거</dt>
-                                <dd className="text-slate-700">{f.ruleReference}</dd>
-                                <dt className="text-slate-500">보완 방법</dt>
-                                <dd className="font-medium text-slate-900">{f.fixAction}</dd>
-                              </dl>
-                            </div>
-                          </li>
-                        ))}
-                    </ol>
-                  </Card>
-                )}
-
-                {audit.crossCheckMatrix.length > 0 && (
-                  <Card>
-                    <CardHead title="서류 간 교차 검증" />
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-[13px]">
-                        <thead className="text-xs text-slate-500">
-                          <tr className="border-b border-slate-100">
-                            <th className="px-4 py-2 font-medium">항목</th>
-                            <th className="px-2 py-2 font-medium">서류 A</th>
-                            <th className="px-2 py-2 font-medium">서류 B</th>
-                            <th className="px-4 py-2 font-medium">결과</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {audit.crossCheckMatrix.map((m) => (
-                            <tr key={m.checkName}>
-                              <td className="px-4 py-2.5 font-medium">{m.checkName}</td>
-                              <td className="px-2 py-2.5 text-slate-600">{display(m.sourceA)}</td>
-                              <td className="px-2 py-2.5 text-slate-600">{display(m.sourceB)}</td>
-                              <td className="px-4 py-2.5">
-                                <Pill tone={m.status === "pass" ? "ok" : "bad"}>
-                                  {m.status === "pass" ? "일치" : "불일치"}
-                                </Pill>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </Card>
-                )}
-
-                {audit.documents.map((d) => (
-                  <Card key={d.docId}>
-                    <CardHead
-                      title={d.headerTitle || d.docTitle}
-                      desc={d.fileName}
-                      action={
-                        d.stampText ? (
-                          <Pill tone={d.stampStatus === "valid" ? "ok" : "bad"}>{d.stampText}</Pill>
-                        ) : undefined
-                      }
-                    />
-                    <dl className="divide-y divide-slate-100">
-                      {d.fields.map((f) => (
-                        <div key={f.label} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-[13px]">
-                          <dt className="w-32 shrink-0 text-xs text-slate-500">{f.label}</dt>
-                          <dd className="min-w-0 flex-1">{display(f.value)}</dd>
-                          {f.status !== "ok" && f.errorTag && (
-                            <Pill tone={f.status === "error" ? "bad" : "warn"}>{f.errorTag}</Pill>
-                          )}
-                        </div>
-                      ))}
-                    </dl>
-                  </Card>
-                ))}
+                <AuditReport audit={audit} display={display} />
 
                 {auditMode === "defect" && (
                   <button
@@ -1473,7 +1507,7 @@ export default function Page() {
             )}
 
             {/* 신청 패키지 */}
-            {view === "package" && (
+            {view === "package" && !active && (
               <>
                 {auditRisks > 0 && (
                   <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
@@ -1763,6 +1797,78 @@ export default function Page() {
 
 /* ───────── 작은 구성 요소 ───────── */
 
+function CardView({ card, onAsk, disabled }: { card: AnswerCard; onAsk: (q: string) => void; disabled: boolean }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-[15px] font-semibold leading-snug text-slate-900">{card.summary}</p>
+
+      {card.facts.length > 0 && (
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200">
+          {card.facts.map((f) => (
+            <div key={f.label} className="bg-white px-3 py-2">
+              <dt className="text-xs text-slate-500">{f.label}</dt>
+              <dd className="tnum mt-0.5 text-sm font-medium text-slate-900">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      {card.steps.length > 0 && (
+        <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2 text-[13px] text-slate-700">
+          {card.steps.map((st, i) => (
+            <li key={i} className="flex items-center gap-1.5">
+              {i > 0 && <ArrowRight className="h-3 w-3 text-slate-300" aria-hidden />}
+              <span className="grid h-5 w-5 place-items-center rounded-full bg-brand-50 text-[11px] font-semibold text-brand-700">
+                {i + 1}
+              </span>
+              {st}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {card.caution && (
+        <p className="flex items-start gap-1.5 text-[13px] text-amber-800">
+          <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {card.caution}
+        </p>
+      )}
+
+      {card.links.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {card.links.map((l) => (
+            <a
+              key={l.url}
+              href={l.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-700"
+            >
+              {l.name}
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          ))}
+        </div>
+      )}
+
+      {card.followUps.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {card.followUps.map((q) => (
+            <button
+              key={q}
+              onClick={() => onAsk(q)}
+              disabled={disabled}
+              className="rounded-full border border-slate-300 px-3 py-1 text-[13px] text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            >
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Rich({ text }: { text: string }) {
   return (
     <>
@@ -1853,6 +1959,712 @@ function FileChip({ name, onRemove }: { name: string; onRemove?: () => void }) {
   );
 }
 
+function ToolList({ tools }: { tools: ToolExecution[] }) {
+  const [openStep, setOpenStep] = useState<number | null>(null);
+  return (
+    <ul className="divide-y divide-slate-100">
+      {tools.map((t) => {
+        const open = openStep === t.step;
+        return (
+          <li key={t.step}>
+            <button
+              onClick={() => setOpenStep(open ? null : t.step)}
+              aria-expanded={open}
+              className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
+            >
+              <span className="tnum w-4 text-xs text-slate-400">{t.step}</span>
+              <StatusDot status={t.status} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-medium">{t.title}</span>
+                <span className="block truncate text-xs text-slate-500">{t.basis}</span>
+              </span>
+              <SourceBadge source={t.source} />
+              <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+            </button>
+            {open && (
+              <div className="grid gap-4 bg-slate-50 px-4 py-3 sm:grid-cols-2">
+                <KeyValues title="입력" data={t.input} />
+                <KeyValues title="결과" data={t.output} />
+                <div className="flex items-center justify-between text-xs text-slate-500 sm:col-span-2">
+                  <code className="font-mono">{t.toolName}</code>
+                  {t.url && (
+                    <a href={t.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-slate-800">
+                      기관 페이지 <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function PolicyCard({ p, sites, onOpen }: { p: PolicyDetail; sites: Site[]; onOpen: (v: View) => void }) {
+  return (
+    <Card>
+      <div className="border-b border-slate-100 px-4 py-3.5">
+        <h3 className="text-[15px] font-semibold text-slate-900">{p.name}</h3>
+        {p.benefit && <p className="tnum mt-1 text-sm font-medium text-brand-700">{p.benefit}</p>}
+        {(p.deadline || p.applyAt || p.asOf) && (
+          <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+            {p.deadline && <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-700">기한 · {p.deadline}</span>}
+            {p.applyAt && <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-700">신청 · {p.applyAt}</span>}
+            {p.asOf && <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-500">기준 · {p.asOf}</span>}
+          </div>
+        )}
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {(
+            [
+              ["triage", "자격 확인"],
+              ["recipe", "서류 준비"],
+              ["audit", "서류 검수"],
+            ] as [View, string][]
+          ).map(([v, label]) => (
+            <button
+              key={v}
+              onClick={() => onOpen(v)}
+              className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {label} <ArrowRight className="h-3 w-3" />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="grid sm:grid-cols-2 sm:divide-x sm:divide-slate-100">
+        <div className="px-4 py-3">
+          <div className="text-xs font-medium text-slate-500">자격 조건</div>
+          {p.conditions.length ? (
+            <ul className="mt-2 space-y-1.5">
+              {p.conditions.map((c) => (
+                <li key={c} className="flex items-start gap-2 text-[13px] text-slate-800">
+                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" strokeWidth={2.5} />
+                  {c}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-[13px] text-slate-400">확인된 조건 없음</p>
+          )}
+        </div>
+        <div className="border-t border-slate-100 px-4 py-3 sm:border-t-0">
+          <div className="text-xs font-medium text-slate-500">필요 서류 {p.documents.length ? `${p.documents.length}종` : ""}</div>
+          {p.documents.length ? (
+            <ul className="mt-2 space-y-1.5">
+              {p.documents.map((d) => {
+                const site = siteFor(sites, d.where);
+                return (
+                  <li key={d.name} className="flex items-start gap-2 text-[13px]">
+                    <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span className="min-w-0 flex-1 text-slate-800">{d.name}</span>
+                    {site ? (
+                      <a
+                        href={site.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex shrink-0 items-center gap-0.5 text-xs text-brand-700 hover:underline"
+                      >
+                        {site.name} <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : (
+                      d.where && <span className="shrink-0 text-xs text-slate-500">{d.where}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="mt-2 text-[13px] text-slate-400">확인된 서류 없음</p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function AnswerPanel({
+  question,
+  msg,
+  card,
+  sites,
+  onOpen,
+}: {
+  question: string;
+  msg: Message;
+  card: AnswerCard;
+  sites: Site[];
+  onOpen: (policyIndex: number, view: View) => void;
+}) {
+  const [done, setDone] = useState<Record<number, boolean>>({});
+  const traces = msg.traces || [];
+  const sources = msg.sources || [];
+  const policies = card.policies || []; // 이전 버전에 저장된 답변에는 없음
+  return (
+    <>
+      <Card>
+        <div className="px-4 py-3.5">
+          <div className="text-xs text-slate-500">질문</div>
+          <div className="mt-0.5 text-[13px] text-slate-800">{question}</div>
+          <p className="mt-2.5 text-[15px] font-semibold leading-snug text-slate-900">{card.summary}</p>
+        </div>
+        {card.links.length > 0 && (
+          <div className="flex flex-wrap gap-2 border-t border-slate-100 px-4 py-3">
+            {card.links.map((l) => (
+              <a
+                key={l.url}
+                href={l.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700"
+              >
+                {l.name} <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {policies.length > 0 && (
+        <div className="space-y-3">
+          <div className="px-1 text-xs font-medium text-slate-500">
+            답변에 나온 정책 {policies.length}개 · 조건과 서류는 공고 원문으로 최종 확인하세요
+          </div>
+          {policies.map((p, i) => (
+            <PolicyCard key={p.name} p={p} sites={sites} onOpen={(v) => onOpen(i, v)} />
+          ))}
+        </div>
+      )}
+
+      {card.steps.length > 0 && (
+        <Card>
+          <CardHead
+            title="신청 체크리스트"
+            desc={`${Object.values(done).filter(Boolean).length} / ${card.steps.length} 완료`}
+          />
+          <ul className="divide-y divide-slate-100">
+            {card.steps.map((st, i) => (
+              <li key={i}>
+                <label className="flex cursor-pointer items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(done[i])}
+                    onChange={() => setDone((d) => ({ ...d, [i]: !d[i] }))}
+                    className="h-4 w-4 accent-brand-600"
+                  />
+                  <span className={done[i] ? "text-slate-400 line-through" : "text-slate-800"}>{st}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      <Card>
+        <CardHead
+          title={`도구 실행 ${traces.length}건`}
+          desc={`실계산 ${traces.filter((t) => t.source === "calc").length} · 예시 데이터 ${traces.filter((t) => t.source === "sample").length} · 실시간 ${traces.filter((t) => t.source === "live").length}`}
+        />
+        {traces.length ? <ToolList tools={traces} /> : <Empty text="이 답변은 별도 도구 없이 만들어졌습니다." />}
+      </Card>
+
+      <Card>
+        <CardHead
+          title={`출처 ${sources.length}곳`}
+          desc={`내 도구 ${sources.filter((s) => s.registered).length}곳 · 원문에서 직접 확인하세요`}
+        />
+        {sources.length ? (
+          <ul className="divide-y divide-slate-100">
+            {sources.map((s) => (
+              <li key={s.url}>
+                <a
+                  href={s.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-slate-50"
+                >
+                  <span className="min-w-0 flex-1 truncate text-slate-800">{s.title}</span>
+                  {s.registered && (
+                    <span className="shrink-0 rounded border border-brand-600/30 bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-700">
+                      내 도구
+                    </span>
+                  )}
+                  <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Empty text="검색 출처가 없습니다." />
+        )}
+      </Card>
+    </>
+  );
+}
+
+function AuditReport({
+  audit,
+  display,
+}: {
+  audit: Pick<AuditResult, "documents" | "findings" | "crossCheckMatrix">;
+  display: (v: string) => string;
+}) {
+  const auditRisks = risksOf(audit);
+  return (
+    <>
+                <div
+                  className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${
+                    auditRisks ? "border-red-200 bg-red-50 text-red-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"
+                  }`}
+                >
+                  {auditRisks ? <CircleAlert className="h-5 w-5 shrink-0" /> : <Check className="h-5 w-5 shrink-0" />}
+                  <div>
+                    <div className="text-sm font-semibold">
+                      {auditRisks ? `반려 위험 ${auditRisks}건` : "감지된 반려 위험 없음"}
+                    </div>
+                    <div className="text-[13px] opacity-90">
+                      {auditRisks
+                        ? "아래 항목을 보완한 뒤 제출하세요."
+                        : "점검한 기준 안에서의 결과이며 최종 판정은 접수 기관이 합니다."}
+                    </div>
+                  </div>
+                </div>
+
+                {auditRisks > 0 && (
+                  <Card>
+                    <CardHead title="보완할 항목" />
+                    <ol className="divide-y divide-slate-100">
+                      {audit.findings
+                        .filter((f) => f.severity !== "pass")
+                        .map((f, i) => (
+                          <li key={f.id} className="flex gap-3 p-4 text-[13px]">
+                            <span className="tnum grid h-5 w-5 shrink-0 place-items-center rounded-full bg-red-100 text-[11px] font-semibold text-red-700">
+                              {i + 1}
+                            </span>
+                            <div className="min-w-0 space-y-1.5">
+                              <div className="font-medium">{f.title.replace(/^\[[^\]]+\]\s*/, "")}</div>
+                              <p className="leading-relaxed text-slate-600">{f.detail}</p>
+                              <dl className="grid grid-cols-[4.5rem_1fr] gap-x-2 gap-y-1 text-xs">
+                                <dt className="text-slate-500">근거</dt>
+                                <dd className="text-slate-700">{f.ruleReference}</dd>
+                                <dt className="text-slate-500">보완 방법</dt>
+                                <dd className="font-medium text-slate-900">{f.fixAction}</dd>
+                              </dl>
+                            </div>
+                          </li>
+                        ))}
+                    </ol>
+                  </Card>
+                )}
+
+                {audit.crossCheckMatrix.length > 0 && (
+                  <Card>
+                    <CardHead title="서류 간 교차 검증" />
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-[13px]">
+                        <thead className="text-xs text-slate-500">
+                          <tr className="border-b border-slate-100">
+                            <th className="px-4 py-2 font-medium">항목</th>
+                            <th className="px-2 py-2 font-medium">서류 A</th>
+                            <th className="px-2 py-2 font-medium">서류 B</th>
+                            <th className="px-4 py-2 font-medium">결과</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {audit.crossCheckMatrix.map((m) => (
+                            <tr key={m.checkName}>
+                              <td className="px-4 py-2.5 font-medium">{m.checkName}</td>
+                              <td className="px-2 py-2.5 text-slate-600">{display(m.sourceA)}</td>
+                              <td className="px-2 py-2.5 text-slate-600">{display(m.sourceB)}</td>
+                              <td className="px-4 py-2.5">
+                                <Pill tone={m.status === "pass" ? "ok" : "bad"}>
+                                  {m.status === "pass" ? "일치" : "불일치"}
+                                </Pill>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                )}
+
+                {audit.documents.map((d) => (
+                  <Card key={d.docId}>
+                    <CardHead
+                      title={d.headerTitle || d.docTitle}
+                      desc={d.fileName}
+                      action={
+                        d.stampText ? (
+                          <Pill tone={d.stampStatus === "valid" ? "ok" : "bad"}>{d.stampText}</Pill>
+                        ) : undefined
+                      }
+                    />
+                    <dl className="divide-y divide-slate-100">
+                      {d.fields.map((f) => (
+                        <div key={f.label} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-[13px]">
+                          <dt className="w-32 shrink-0 text-xs text-slate-500">{f.label}</dt>
+                          <dd className="min-w-0 flex-1">{display(f.value)}</dd>
+                          {f.status !== "ok" && f.errorTag && (
+                            <Pill tone={f.status === "error" ? "bad" : "warn"}>{f.errorTag}</Pill>
+                          )}
+                        </div>
+                      ))}
+                    </dl>
+                  </Card>
+                ))}
+    </>
+  );
+}
+
+type CondAnswer = "yes" | "no" | "unsure";
+interface PolicyState {
+  cond?: Record<number, CondAnswer>;
+  docs?: Record<number, boolean>;
+  audit?: AuditResult;
+}
+
+// 발급처 이름이 내 도구와 같으면 바로 갈 수 있게 링크로
+const siteFor = (sites: Site[], where?: string) =>
+  where ? sites.find((s) => where.includes(s.name) || s.name.includes(where)) : undefined;
+
+function PolicyHead({ p }: { p: PolicyDetail }) {
+  return (
+    <Card>
+      <div className="px-4 py-3.5">
+        <h3 className="text-[15px] font-semibold text-slate-900">{p.name}</h3>
+        {p.benefit && <p className="tnum mt-1 text-sm font-medium text-brand-700">{p.benefit}</p>}
+        <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+          {p.deadline && <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-700">기한 · {p.deadline}</span>}
+          {p.applyAt && <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-700">신청 · {p.applyAt}</span>}
+          {p.asOf && <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-500">기준 · {p.asOf}</span>}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function AskButton({ q, onAsk, busy, children }: { q: string; onAsk: (q: string) => void; busy: boolean; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={() => onAsk(q)}
+      disabled={busy}
+      className="shrink-0 text-xs text-brand-700 hover:underline disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}
+
+function PolicyTriage({
+  p,
+  st,
+  onChange,
+  onAsk,
+  busy,
+}: {
+  p: PolicyDetail;
+  st: PolicyState;
+  onChange: (s: Partial<PolicyState>) => void;
+  onAsk: (q: string) => void;
+  busy: boolean;
+}) {
+  const cond = st.cond || {};
+  const n = p.conditions.length;
+  const no = p.conditions.filter((_, i) => cond[i] === "no").length;
+  const yes = p.conditions.filter((_, i) => cond[i] === "yes").length;
+  const open = n - yes - no;
+  const verdict = !n
+    ? null
+    : no
+    ? { cls: "border-red-200 bg-red-50 text-red-900", title: `충족하지 않는 조건 ${no}개`, body: "이 조건 때문에 신청이 어려울 수 있습니다. 예외 규정은 공고 원문을 확인하세요." }
+    : open === n
+    ? { cls: "border-slate-200 bg-white text-slate-700", title: "조건마다 해당 여부를 골라 주세요", body: "고른 결과로 신청 가능성을 바로 알려 드립니다." }
+    : open
+    ? { cls: "border-amber-200 bg-amber-50 text-amber-900", title: `확인이 필요한 조건 ${open}개`, body: "모르는 조건은 '물어보기'로 채팅에서 확인할 수 있습니다." }
+    : { cls: "border-emerald-200 bg-emerald-50 text-emerald-900", title: "조건을 모두 충족합니다", body: "신청 대상일 가능성이 높습니다. 최종 판정은 접수 기관이 합니다." };
+
+  return (
+    <>
+      <PolicyHead p={p} />
+      {verdict && (
+        <div className={`rounded-lg border px-4 py-3 ${verdict.cls}`}>
+          <div className="text-sm font-semibold">{verdict.title}</div>
+          <div className="mt-0.5 text-[13px] opacity-90">{verdict.body}</div>
+        </div>
+      )}
+      <Card>
+        <CardHead title="자격 조건 확인" desc={`${yes} / ${n} 충족 · AI가 검색으로 정리한 조건`} />
+        {n ? (
+          <ul className="divide-y divide-slate-100">
+            {p.conditions.map((c, i) => (
+              <li key={c} className="px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-[13px] text-slate-800">{c}</span>
+                  {cond[i] === "unsure" && (
+                    <AskButton q={`${p.name} 조건 '${c}'에 대해 자세히 알려줘`} onAsk={onAsk} busy={busy}>
+                      물어보기
+                    </AskButton>
+                  )}
+                </div>
+                <div className="mt-2 inline-flex rounded-md border border-slate-300 bg-white p-0.5 text-xs">
+                  {(
+                    [
+                      ["yes", "해당"],
+                      ["no", "아님"],
+                      ["unsure", "모름"],
+                    ] as [CondAnswer, string][]
+                  ).map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => onChange({ cond: { ...cond, [i]: v } })}
+                      aria-pressed={cond[i] === v}
+                      className={`rounded px-2.5 py-1 transition-colors ${
+                        cond[i] === v
+                          ? v === "yes"
+                            ? "bg-emerald-600 text-white"
+                            : v === "no"
+                            ? "bg-red-600 text-white"
+                            : "bg-slate-700 text-white"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="flex items-center justify-between gap-3 px-4 py-4 text-[13px] text-slate-500">
+            확인된 조건이 없습니다.
+            <AskButton q={`${p.name} 자격 조건 알려줘`} onAsk={onAsk} busy={busy}>
+              조건 물어보기
+            </AskButton>
+          </div>
+        )}
+      </Card>
+    </>
+  );
+}
+
+function PolicyDocs({
+  p,
+  st,
+  onChange,
+  sites,
+  onAsk,
+  busy,
+}: {
+  p: PolicyDetail;
+  st: PolicyState;
+  onChange: (s: Partial<PolicyState>) => void;
+  sites: Site[];
+  onAsk: (q: string) => void;
+  busy: boolean;
+}) {
+  const docs = st.docs || {};
+  const done = p.documents.filter((_, i) => docs[i]).length;
+  return (
+    <>
+      <PolicyHead p={p} />
+      <Card>
+        <CardHead title={`준비할 서류 ${p.documents.length}종`} desc={`준비 완료 ${done} / ${p.documents.length}`} />
+        {p.documents.length ? (
+          <ul className="divide-y divide-slate-100">
+            {p.documents.map((d, i) => {
+              const site = siteFor(sites, d.where);
+              return (
+                <li key={d.name} className="flex items-start gap-3 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    aria-label={`${d.name} 준비 완료`}
+                    checked={Boolean(docs[i])}
+                    onChange={() => onChange({ docs: { ...docs, [i]: !docs[i] } })}
+                    className="mt-0.5 h-4 w-4 accent-[#2558D9]"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-[13px] font-medium ${docs[i] ? "text-slate-400 line-through" : "text-slate-900"}`}>{d.name}</div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                      {d.where && <span>발급처 · {d.where}</span>}
+                      <AskButton q={`${p.name}에 내는 ${d.name}은 어떻게 발급해?`} onAsk={onAsk} busy={busy}>
+                        발급 방법 묻기
+                      </AskButton>
+                    </div>
+                  </div>
+                  {site && (
+                    <a
+                      href={site.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex shrink-0 items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {site.name} <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <div className="flex items-center justify-between gap-3 px-4 py-4 text-[13px] text-slate-500">
+            확인된 서류가 없습니다.
+            <AskButton q={`${p.name} 신청할 때 필요한 서류 알려줘`} onAsk={onAsk} busy={busy}>
+              서류 물어보기
+            </AskButton>
+          </div>
+        )}
+      </Card>
+    </>
+  );
+}
+
+function PolicyAudit({
+  p,
+  st,
+  onUpload,
+  busy,
+  display,
+}: {
+  p: PolicyDetail;
+  st: PolicyState;
+  onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  busy: boolean;
+  display: (v: string) => string;
+}) {
+  return (
+    <>
+      <Card>
+        <CardHead
+          title={`'${p.name}' 기준 서류 검수`}
+          desc={`필요 서류 ${p.documents.length}종 대비 누락, 발급일, 성명·주소 일치를 확인합니다.`}
+          action={
+            <label
+              className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700 ${busy ? "pointer-events-none opacity-60" : ""}`}
+            >
+              {busy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
+              서류 올리기
+              <input type="file" multiple accept=".pdf,image/*,.txt" onChange={onUpload} disabled={busy} className="sr-only" />
+            </label>
+          }
+        />
+        <p className="px-4 pb-3 text-xs text-slate-500">
+          Gemini가 판독합니다. 텍스트 서류는 주민번호 등을 가린 뒤 보내고, 이미지·PDF는 원본이 전송됩니다. 서버에 저장하지 않습니다.
+        </p>
+      </Card>
+      {st.audit ? (
+        <AuditReport audit={st.audit} display={display} />
+      ) : (
+        <Card>
+          <Empty text="아직 검수한 서류가 없습니다. 서류를 올리면 결과가 여기에 표시됩니다." />
+        </Card>
+      )}
+    </>
+  );
+}
+
+function PolicyPackage({
+  p,
+  st,
+  steps,
+  links,
+}: {
+  p: PolicyDetail;
+  st: PolicyState;
+  steps: string[];
+  links: { name: string; url: string }[];
+}) {
+  const [saved, setSaved] = useState(false);
+  const yes = p.conditions.filter((_, i) => st.cond?.[i] === "yes").length;
+  const no = p.conditions.filter((_, i) => st.cond?.[i] === "no").length;
+  const ready = p.documents.filter((_, i) => st.docs?.[i]).length;
+  const risks = st.audit ? risksOf(st.audit) : null;
+  const condLabel = (i: number) => ({ yes: "해당", no: "아님", unsure: "모름" })[st.cond?.[i] || "unsure"] || "미확인";
+
+  const download = () => {
+    const content = [
+      `[공고패스] ${p.name} 신청 준비 요약`,
+      p.benefit && `지원 내용: ${p.benefit}`,
+      p.deadline && `기한: ${p.deadline}`,
+      p.applyAt && `신청처: ${p.applyAt}`,
+      p.asOf && `정보 기준: ${p.asOf}`,
+      `※ AI가 검색으로 정리한 정보입니다. 공고 원문으로 확인하고, 최종 판정은 접수 기관이 합니다.`,
+      ``,
+      `1. 자격 조건 (${yes}/${p.conditions.length} 충족)`,
+      ...p.conditions.map((c, i) => `- [${st.cond?.[i] ? condLabel(i) : "미확인"}] ${c}`),
+      ``,
+      `2. 필요 서류 (${ready}/${p.documents.length} 준비)`,
+      ...p.documents.map((d, i) => `- [${st.docs?.[i] ? "준비" : "미준비"}] ${d.name}${d.where ? ` (${d.where})` : ""}`),
+      ``,
+      `3. 서류 검수: ${risks === null ? "미실시" : `반려 위험 ${risks}건`}`,
+      ...(st.audit?.findings.filter((f) => f.severity !== "pass").map((f) => `- ${f.title}: ${f.fixAction}`) || []),
+      ``,
+      `4. 신청 단계`,
+      ...steps.map((s, i) => `${i + 1}. ${s}`),
+      ...(links.length ? [``, `5. 바로가기`, ...links.map((l) => `- ${l.name}: ${l.url}`)] : []),
+    ]
+      .filter((l): l is string => typeof l === "string")
+      .join("\n");
+    const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `공고패스_${p.name.replace(/\s+/g, "_")}_신청준비.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  return (
+    <>
+      <PolicyHead p={p} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Stat label="자격 조건" value={`${yes} / ${p.conditions.length}`} note={no ? `아님 ${no}개` : "자격 판정 탭에서 확인"} ok={!no && yes === p.conditions.length && yes > 0} />
+        <Stat label="서류 준비" value={`${ready} / ${p.documents.length}`} note="발급 가이드 탭에서 체크" ok={ready === p.documents.length && ready > 0} />
+        <Stat label="서류 검수" value={risks === null ? "미실시" : `위험 ${risks}건`} note="사전 검수 탭에서 실행" ok={risks === 0} />
+      </div>
+      {steps.length > 0 && (
+        <Card>
+          <CardHead title="신청 단계" />
+          <ol className="divide-y divide-slate-100">
+            {steps.map((s, i) => (
+              <li key={i} className="flex items-center gap-3 px-4 py-2.5 text-[13px]">
+                <span className="tnum grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand-50 text-[11px] font-semibold text-brand-700">
+                  {i + 1}
+                </span>
+                {s}
+              </li>
+            ))}
+          </ol>
+          {links.length > 0 && (
+            <div className="flex flex-wrap gap-2 border-t border-slate-100 px-4 py-3">
+              {links.map((l) => (
+                <a
+                  key={l.url}
+                  href={l.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {l.name} <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+      <button
+        onClick={download}
+        className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700 active:translate-y-px"
+      >
+        {saved ? <Check className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+        {saved ? "내려받았습니다" : "신청 준비 요약 내려받기 (.txt)"}
+      </button>
+    </>
+  );
+}
 function Card({ children }: { children: React.ReactNode }) {
   return <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">{children}</section>;
 }
