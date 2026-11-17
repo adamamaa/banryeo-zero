@@ -2434,7 +2434,9 @@ function LiquidOrb({ size = "md" }: { size?: "md" | "sm" }) {
     }
     syncSize();
 
-    const gl = (canvas.getContext("webgl") || canvas.getContext("experimental-webgl")) as WebGLRenderingContext | null;
+    // 배경이 비치도록 투명 캔버스로 만든다 (색은 셰이더에서 알파를 곱해 내보냄)
+    const ctxOpts = { alpha: true, premultipliedAlpha: true, antialias: true };
+    const gl = (canvas.getContext("webgl", ctxOpts) || canvas.getContext("experimental-webgl", ctxOpts)) as WebGLRenderingContext | null;
     if (!gl) return () => ro?.disconnect();
 
     const vs = `attribute vec2 a_position;
@@ -2497,7 +2499,8 @@ void main() {
     if (dropletMask <= 0.001) {
         float ambientGlow = exp(-r * 6.5) * 0.45;
         vec3 glowCol = vec3(0.65, 0.45, 0.95);
-        gl_FragColor = vec4(glowCol, ambientGlow * smoothstep(0.5, 0.28, r));
+        float glowA = ambientGlow * smoothstep(0.5, 0.28, r);
+        gl_FragColor = vec4(glowCol * glowA, glowA);
         return;
     }
 
@@ -2533,7 +2536,7 @@ void main() {
     float alpha = clamp(0.72 + fresnel * 0.26 + spec1 * 0.5, 0.0, 0.98);
     alpha *= dropletMask;
 
-    gl_FragColor = vec4(col, alpha);
+    gl_FragColor = vec4(col * alpha, alpha);
 }`;
 
     function cs(type: number, src: string) {
@@ -2576,6 +2579,8 @@ void main() {
       if (!canvas || !gl) return;
       if (typeof ResizeObserver === "undefined") syncSize();
       gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
       if (uTime) gl.uniform1f(uTime, t * 0.001);
       if (uRes) gl.uniform2f(uRes, canvas.width, canvas.height);
       if (uMouse) gl.uniform2f(uMouse, mouse.x, mouse.y);
