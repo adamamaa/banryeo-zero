@@ -988,6 +988,7 @@ export default function Page() {
     const decoder = new TextDecoder();
     let buf = "";
     let finalOk = true;
+    let gotFinal = false; // result 또는 error 이벤트를 받았는지
     let finalData: Record<string, unknown> = {};
 
     while (true) {
@@ -1014,9 +1015,11 @@ export default function Page() {
             setAgentThought(parsed.text);
           } else if (ev === "result") {
             finalOk = true;
+            gotFinal = true;
             finalData = parsed;
           } else if (ev === "error") {
             finalOk = false;
+            gotFinal = true;
             finalData = parsed;
           }
         } catch {
@@ -1025,6 +1028,10 @@ export default function Page() {
       }
     }
 
+    // 결과 이벤트 없이 스트림이 끝났으면 연결이 끊긴 것 (서버 재시작, 네트워크 등)
+    if (!gotFinal) {
+      return { ok: false, data: { message: "답변을 받는 도중 연결이 끊겼습니다. 같은 질문을 다시 보내 주세요." } };
+    }
     return { ok: finalOk, data: finalData };
   };
 
@@ -1184,7 +1191,7 @@ export default function Page() {
       pendingMsgIdRef.current = null;
 
       if (!ok || !data.reply) {
-        patch(id, { content: String(data.message || "답변을 만들지 못했습니다."), error: true });
+        patch(id, { content: String(data.message || "AI가 빈 답을 보냈습니다. 같은 질문을 다시 보내 주세요."), error: true });
         setAgentActive(false);
         setAgentScanning(false);
         return;
