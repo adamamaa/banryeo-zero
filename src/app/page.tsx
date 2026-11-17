@@ -781,101 +781,41 @@ export default function Page() {
             </svg>
             <span>전체 점검 실행</span>
           </button>
-          <label
-            className="p-1 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-            title="이미지·PDF 서류 첨부"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-              <rect height="18" rx="2" stroke="currentColor" width="18" x="3" y="3" />
-              <circle cx="8.5" cy="8.5" fill="currentColor" r="1.5" />
-              <path d="M21 15l-5-5L5 21" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+          <label className="inline-flex shrink-0 cursor-pointer items-center space-x-1.5 bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1 rounded-full text-slate-600 text-xs font-medium transition-colors">
+            <Paperclip className="w-3.5 h-3.5 text-slate-500" />
+            <span>서류 첨부</span>
             <input type="file" multiple accept=".pdf,image/*,.txt" onChange={onFiles} className="sr-only" />
           </label>
-          <button
-            type="button"
-            onClick={() => send(undefined, "월세가 70만 원을 넘어도 받을 수 있나요?")}
-            disabled={working}
-            className="p-1 text-slate-400 hover:text-purple-600 transition-colors"
-            title="예시 질문 보내기"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-              <path
-                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
         </div>
-        <div className="flex items-center space-x-2.5">
-          <button
-            type="button"
-            onClick={() => setShowTools(true)}
-            className="text-slate-400 hover:text-slate-600 transition-colors"
-            title="API 및 도구 설정"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-              <rect height="16" rx="2" stroke="currentColor" width="16" x="4" y="4" />
-              <rect height="6" stroke="currentColor" width="6" x="9" y="9" />
-              <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" strokeLinecap="round" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowTools(true)}
-            className="text-slate-400 hover:text-slate-600 transition-colors"
-            title="내 도구 사이트 관리"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="10" stroke="currentColor" />
-              <line x1="2" x2="22" y1="12" y2="12" />
-              <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-            </svg>
-          </button>
-          <button
-            type="submit"
-            disabled={working || (!input.trim() && !staged.length)}
-            aria-label="보내기"
-            className="w-7 h-7 rounded-full bg-purple-200 hover:bg-purple-300 text-purple-700 flex items-center justify-center transition-colors disabled:opacity-40"
-          >
-            {working ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : <ArrowUp className="w-3.5 h-3.5" />}
-          </button>
-        </div>
+        <button
+          type="submit"
+          disabled={working || (!input.trim() && !staged.length)}
+          aria-label="보내기"
+          className="w-7 h-7 rounded-full bg-purple-200 hover:bg-purple-300 text-purple-700 flex items-center justify-center transition-colors disabled:opacity-40"
+        >
+          {working ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : <ArrowUp className="w-3.5 h-3.5" />}
+        </button>
       </div>
-      <div className="flex items-center justify-between pt-2.5 mt-1 border-t border-slate-50 text-[11px] text-slate-500">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center space-x-1 text-slate-600 font-medium">
-            <span className="text-purple-500">✦</span>
-            <span>추천 질문</span>
-          </span>
-          {[
-            "월세가 70만 원을 넘어도 받을 수 있나요?",
-            "주민등록등본은 어떻게 발급하나요?",
-            "국민취업지원제도 신청 자격은?",
-          ].map((q) => (
-            <button
-              key={q}
-              type="button"
-              onClick={() => send(undefined, q)}
-              disabled={working}
-              className="rounded-full bg-purple-50/70 hover:bg-purple-100/80 text-purple-700 px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50"
-            >
-              {q}
-            </button>
-          ))}
-        </div>
-        <label className="inline-flex shrink-0 cursor-pointer items-center space-x-1.5 bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1 rounded-full text-slate-600 text-[11px] font-medium transition-colors">
-          <svg className="w-3 h-3 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path
-              d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          <span>서류 첨부</span>
-          <input type="file" multiple accept=".pdf,image/*,.txt" onChange={onFiles} className="sr-only" />
-        </label>
+      <div className="flex flex-wrap items-center gap-2 pt-2.5 mt-1 border-t border-slate-50 text-[11px] text-slate-500">
+        <span className="inline-flex items-center space-x-1 text-slate-600 font-medium">
+          <span className="text-purple-500">✦</span>
+          <span>추천 질문</span>
+        </span>
+        {[
+          "월세가 70만 원을 넘어도 받을 수 있나요?",
+          "주민등록등본은 어떻게 발급하나요?",
+          "국민취업지원제도 신청 자격은?",
+        ].map((q) => (
+          <button
+            key={q}
+            type="button"
+            onClick={() => send(undefined, q)}
+            disabled={working}
+            className="rounded-full bg-purple-50/70 hover:bg-purple-100/80 text-purple-700 px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50"
+          >
+            {q}
+          </button>
+        ))}
       </div>
     </form>
   );
@@ -883,7 +823,7 @@ export default function Page() {
   return (
     <div className="h-dvh w-screen overflow-hidden antialiased text-slate-800 selection:bg-brand-100 selection:text-brand-700">
       <div className="flex h-full w-full overflow-hidden bg-white">
-        {/* ───────── 사이드바 (Cortex LeftSidebar) ───────── */}
+        {/* ───────── 사이드바 ───────── */}
         {sidebarOpen && (
           <aside className="w-[270px] shrink-0 bg-[#fbfbfb] border-r border-slate-100 flex flex-col justify-between p-4 selection:bg-purple-200 max-lg:hidden">
             <div className="flex flex-col space-y-4">
@@ -894,10 +834,7 @@ export default function Page() {
                       <path d="M11 2a2 2 0 0 1 2 2v6h6a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-6v6a2 2 0 0 1-2 2v0a2 2 0 0 1-2-2v-6H3a2 2 0 0 1-2-2v0a2 2 0 0 1 2-2h6V4a2 2 0 0 1 2-2v0z" />
                     </svg>
                   </div>
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="font-semibold text-[17px] tracking-tight text-slate-900">공고패스</span>
-                    <span className="text-[11px] font-medium text-purple-600">Cortex</span>
-                  </div>
+                  <span className="font-semibold text-[17px] tracking-tight text-slate-900">공고패스</span>
                 </div>
                 <button
                   aria-label="사이드바 닫기"
@@ -944,70 +881,6 @@ export default function Page() {
                   </span>
                 </div>
               </div>
-
-              <nav className="space-y-0.5 pt-1 text-xs text-slate-700">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView("triage");
-                    setCanvasOpen(true);
-                  }}
-                  className="w-full flex items-center space-x-3 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors font-medium text-left"
-                >
-                  <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" />
-                    <path
-                      d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  <span>자격 판정 탐색</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView("recipe");
-                    setCanvasOpen(true);
-                  }}
-                  className="w-full flex items-center space-x-3 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors font-medium text-left"
-                >
-                  <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-                    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  <span>서류 발급 가이드</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView("audit");
-                    setCanvasOpen(true);
-                  }}
-                  className="w-full flex items-center space-x-3 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors font-medium text-left"
-                >
-                  <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-                    <path
-                      d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-4l-2 3h-4l-2-3H4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  <span>사전 검수 · 파일</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView("tools");
-                    setCanvasOpen(true);
-                  }}
-                  className="w-full flex items-center space-x-3 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors font-medium text-left"
-                >
-                  <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-                    <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  <span>실행 내역 · 기록</span>
-                </button>
-              </nav>
             </div>
 
             <div className="flex-1 overflow-y-auto no-scrollbar pt-4 text-xs space-y-4 pr-1">
@@ -1105,7 +978,7 @@ export default function Page() {
           </aside>
         )}
 
-        {/* ───────── 메인 워크스페이스 (Cortex MainWorkspace) ───────── */}
+        {/* ───────── 메인 워크스페이스 ───────── */}
         <main className="flex-1 flex flex-col bg-white overflow-hidden relative justify-between min-w-0">
           <header className="h-16 px-6 shrink-0 flex items-center justify-between border-b border-transparent">
             <div className="flex items-center gap-2">
@@ -1125,46 +998,21 @@ export default function Page() {
                 <div className="w-4 h-4 rounded-md bg-purple-200 flex items-center justify-center text-purple-700 text-[10px]">
                   ✦
                 </div>
-                <span>Cortex · {policy.title}</span>
-                <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                <span>{policy.title}</span>
               </button>
             </div>
 
             <div className="flex items-center space-x-2">
-              <button
-                type="button"
-                aria-label="도구와 연결 설정"
-                onClick={() => setShowTools(true)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <circle cx="5" cy="12" fill="currentColor" r="1" />
-                  <circle cx="12" cy="12" fill="currentColor" r="1" />
-                  <circle cx="19" cy="12" fill="currentColor" r="1" />
-                </svg>
-              </button>
               {messages.length > 0 && (
                 <button
                   type="button"
                   onClick={newChat}
-                  title="새 대화"
-                  className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+                  className="inline-flex items-center space-x-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" />
+                  <span>새 대화</span>
                 </button>
               )}
-              <button
-                type="button"
-                onClick={downloadPackage}
-                className="inline-flex items-center space-x-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              >
-                <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                <span className="max-sm:hidden">{downloaded ? "내려받음" : "점검 요약 내보내기"}</span>
-              </button>
               <button
                 type="button"
                 onClick={() => setCanvasOpen((v) => !v)}
@@ -1182,7 +1030,7 @@ export default function Page() {
                   <div className="flex flex-col items-center text-center mb-5">
                     <LiquidOrb />
                     <h2 className="text-xl font-medium text-brand-400 tracking-tight mb-1">
-                      Hello, 공고패스 Cortex
+                      공고패스 AI 사전 점검
                     </h2>
                     <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
                       지원금 신청서, 내기 전에 먼저 점검하세요
@@ -1403,37 +1251,10 @@ export default function Page() {
             <div className="shrink-0 px-6 md:px-8 pb-3 max-w-3xl mx-auto w-full">{promptCard}</div>
           )}
 
-          <footer className="h-11 px-6 shrink-0 flex items-center justify-between border-t border-transparent text-[11px] text-slate-400">
-            <div className="w-16 max-sm:hidden" />
+          <footer className="h-10 px-6 shrink-0 flex items-center justify-center border-t border-transparent text-[11px] text-slate-400">
             <p className="text-center truncate">
-              사전 점검 도우미 결과이며 최종 판정은 접수 기관이 합니다 ·{" "}
-              <button type="button" onClick={() => setShowTools(true)} className="text-purple-600 hover:underline">
-                API 및 사이트 연결 설정
-              </button>
+              사전 점검 도우미 결과이며 최종 판정은 접수 기관이 합니다.
             </p>
-            <div className="flex items-center space-x-2">
-              <button
-                type="button"
-                aria-label="주민번호 마스킹 전환"
-                title={maskOnScreen ? "주민번호 마스킹 켜짐" : "주민번호 마스킹 꺼짐"}
-                onClick={() => setMaskOnScreen((v) => !v)}
-                className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors text-xs font-serif shadow-sm ${
-                  maskOnScreen
-                    ? "border-purple-200 bg-purple-50 text-purple-700"
-                    : "border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                文A
-              </button>
-              <button
-                type="button"
-                aria-label="도구 및 도움말"
-                onClick={() => setShowTools(true)}
-                className="w-7 h-7 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors text-xs font-medium shadow-sm"
-              >
-                ?
-              </button>
-            </div>
           </footer>
         </main>
 
