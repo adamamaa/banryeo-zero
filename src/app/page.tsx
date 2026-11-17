@@ -301,10 +301,22 @@ export default function Page() {
   };
   const myTools = allTools.filter((t) => addedIds.includes(t.id));
 
+  const panelHasData =
+    messages.length > 0 || tools.length > 0 || summary !== null || upload !== null || hasProfileInput(profile);
+
   const newChat = () => {
     if (working) return;
     setMessages([]);
     setChatId(`c-${Date.now()}`);
+    setTools([]);
+    setSummary(null);
+    setUpload(null);
+    setProfile(EMPTY_PROFILE);
+    setFocusId(null);
+    setCtx("demo");
+    setAnswers({});
+    setDoneDocs({});
+    setView("tools");
   };
   const openChat = (id: string) => {
     const c = chats.find((x) => x.id === id);
@@ -1585,18 +1597,28 @@ export default function Page() {
           }`}
         >
           <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-100 bg-white/80 px-4 backdrop-blur">
-            <PanelTabs
-              tabs={focusMsg ? [{ id: "answer" as View, label: "답변 근거" }, ...VIEWS] : VIEWS}
-              value={view}
-              onChange={setView}
-            />
+            {panelHasData ? (
+              <PanelTabs
+                tabs={focusMsg ? [{ id: "answer" as View, label: "답변 근거" }, ...VIEWS] : VIEWS}
+                value={view}
+                onChange={setView}
+              />
+            ) : (
+              <span className="text-xs font-medium text-slate-400">점검 결과</span>
+            )}
             <IconButton label="점검 패널 닫기" onClick={() => setCanvasOpen(false)} className="lg:hidden">
               <PanelRight className="h-4 w-4" />
             </IconButton>
           </div>
 
-          <div key={view + ctx} className="stagger flex-1 space-y-4 overflow-y-auto p-5">
-            {view !== "answer" && policyOptions.length > 0 && (
+          <div key={panelHasData ? view + ctx : "empty"} className="stagger flex-1 space-y-4 overflow-y-auto p-5">
+            {!panelHasData ? (
+              <div className="flex h-full min-h-[260px] items-center justify-center">
+                <Empty text="질문을 입력하거나 서류를 첨부하면 점검 결과가 여기에 표시됩니다." />
+              </div>
+            ) : (
+              <>
+                {view !== "answer" && policyOptions.length > 0 && (
               <label className="flex items-center gap-2 text-xs text-slate-500">
                 <span className="shrink-0">기준 정책</span>
                 <select
@@ -2053,6 +2075,8 @@ export default function Page() {
                   {downloaded ? <Check className="h-4 w-4" /> : <Download className="h-4 w-4" />}
                   {downloaded ? "내려받았습니다" : "점검 요약 내려받기 (.txt)"}
                 </button>
+              </>
+            )}
               </>
             )}
           </div>
