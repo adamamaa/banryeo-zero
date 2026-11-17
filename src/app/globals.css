@@ -4,11 +4,11 @@
 
 @layer base {
   body {
-    @apply bg-white text-slate-900 antialiased;
+    @apply text-slate-800 antialiased;
     word-break: keep-all;
   }
   :focus-visible {
-    outline: 2px solid #2558d9;
+    outline: 2px solid #9333ea;
     outline-offset: 2px;
   }
   input[type="number"]::-webkit-inner-spin-button {
@@ -22,13 +22,34 @@
   }
 }
 
+/* Custom ethereal purple fluid background */
+.bg-ethereal-mesh {
+  background-color: #dfd7eb;
+  background-image:
+    radial-gradient(at 0% 0%, #ebe2f7 0px, transparent 50%),
+    radial-gradient(at 100% 0%, #d8caee 0px, transparent 50%),
+    radial-gradient(at 50% 50%, #eae2f8 0px, transparent 60%),
+    radial-gradient(at 0% 100%, #ebdff5 0px, transparent 50%),
+    radial-gradient(at 100% 100%, #cbbede 0px, transparent 55%),
+    radial-gradient(at 80% 40%, #e2d1f7 0px, transparent 40%);
+}
+
+/* Hide scrollbars gracefully */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #d8b4fe;
   border-radius: 9999px;
-  border: 2px solid transparent;
+  border: 1px solid transparent;
   background-clip: content-box;
 }

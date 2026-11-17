@@ -206,6 +206,7 @@ export default function Page() {
   const [siteUrl, setSiteUrl] = useState("");
   const [siteError, setSiteError] = useState("");
   const [maskOnScreen, setMaskOnScreen] = useState(true);
+  const [sidebarSearch, setSidebarSearch] = useState("");
 
   const [profile, setProfile] = useState<Profile>({
     age: 26,
@@ -729,398 +730,712 @@ export default function Page() {
   const quizDone = quizImpacts.every(Boolean);
   const quizWarn = quizImpacts.find((o) => o?.ruleImpact === "warning");
 
-  return (
-    <div className="flex h-dvh w-screen overflow-hidden bg-white text-slate-900">
-      {/* ───────── 사이드바 ───────── */}
-      {sidebarOpen && (
-        <aside className="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50 max-lg:hidden">
-          <div className="flex h-14 items-center justify-between px-4">
-            <div className="flex items-center gap-2.5">
-              <span className="grid h-7 w-7 place-items-center rounded-md bg-brand-600 text-white">
-                <FileCheck2 className="h-4 w-4" strokeWidth={2} />
-              </span>
-              <span className="text-[15px] font-semibold tracking-tight">공고패스</span>
-            </div>
-            <IconButton label="사이드바 닫기" onClick={() => setSidebarOpen(false)}>
-              <PanelLeft className="h-4 w-4" />
-            </IconButton>
-          </div>
+  const filteredChats = sidebarSearch.trim()
+    ? chats.filter((c) => c.title.toLowerCase().includes(sidebarSearch.trim().toLowerCase()))
+    : chats;
+  const filteredTools = sidebarSearch.trim()
+    ? myTools.filter((t) => t.name.toLowerCase().includes(sidebarSearch.trim().toLowerCase()))
+    : myTools;
 
-          <div className="px-3">
+  const promptCard = (
+    <form
+      onSubmit={send}
+      className="w-full bg-white border border-slate-200/90 rounded-2xl shadow-input p-3 transition-shadow focus-within:ring-2 focus-within:ring-purple-200 focus-within:border-purple-300"
+    >
+      {staged.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pb-2">
+          {staged.map((f, i) => (
+            <FileChip
+              key={`${f.fileName}-${i}`}
+              name={f.fileName}
+              onRemove={() => setStaged((prev) => prev.filter((_, j) => j !== i))}
+            />
+          ))}
+        </div>
+      )}
+      <textarea
+        rows={2}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            send();
+          }
+        }}
+        aria-label="메시지 입력"
+        placeholder="청년 정책을 물어보거나 공고문·서류를 첨부하세요..."
+        className="w-full text-sm border-0 focus:ring-0 resize-none p-1 text-slate-700 placeholder:text-slate-400 outline-none bg-transparent"
+      />
+      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            onClick={() => runMission("all")}
+            disabled={working}
+            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full border border-purple-300 bg-purple-50/50 hover:bg-purple-100 text-purple-700 text-xs font-medium transition-colors disabled:opacity-50"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M12 21a9 9 0 100-18 9 9 0 000 18z" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M12 8v8m-4-4h8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span>전체 점검 실행</span>
+          </button>
+          <label
+            className="p-1 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+            title="이미지·PDF 서류 첨부"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+              <rect height="18" rx="2" stroke="currentColor" width="18" x="3" y="3" />
+              <circle cx="8.5" cy="8.5" fill="currentColor" r="1.5" />
+              <path d="M21 15l-5-5L5 21" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <input type="file" multiple accept=".pdf,image/*,.txt" onChange={onFiles} className="sr-only" />
+          </label>
+          <button
+            type="button"
+            onClick={() => send(undefined, "월세가 70만 원을 넘어도 받을 수 있나요?")}
+            disabled={working}
+            className="p-1 text-slate-400 hover:text-purple-600 transition-colors"
+            title="예시 질문 보내기"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+              <path
+                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+        <div className="flex items-center space-x-2.5">
+          <button
+            type="button"
+            onClick={() => setShowTools(true)}
+            className="text-slate-400 hover:text-slate-600 transition-colors"
+            title="API 및 도구 설정"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+              <rect height="16" rx="2" stroke="currentColor" width="16" x="4" y="4" />
+              <rect height="6" stroke="currentColor" width="6" x="9" y="9" />
+              <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" strokeLinecap="round" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowTools(true)}
+            className="text-slate-400 hover:text-slate-600 transition-colors"
+            title="내 도구 사이트 관리"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" />
+              <line x1="2" x2="22" y1="12" y2="12" />
+              <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+            </svg>
+          </button>
+          <button
+            type="submit"
+            disabled={working || (!input.trim() && !staged.length)}
+            aria-label="보내기"
+            className="w-7 h-7 rounded-full bg-purple-200 hover:bg-purple-300 text-purple-700 flex items-center justify-center transition-colors disabled:opacity-40"
+          >
+            {working ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : <ArrowUp className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+      </div>
+      <div className="flex items-center justify-between pt-2.5 mt-1 border-t border-slate-50 text-[11px] text-slate-500">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center space-x-1 text-slate-600 font-medium">
+            <span className="text-purple-500">✦</span>
+            <span>추천 질문</span>
+          </span>
+          {[
+            "월세가 70만 원을 넘어도 받을 수 있나요?",
+            "주민등록등본은 어떻게 발급하나요?",
+            "국민취업지원제도 신청 자격은?",
+          ].map((q) => (
             <button
-              onClick={newChat}
-              className="flex w-full items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-[13px] font-medium text-slate-800 transition-colors hover:bg-slate-100 active:translate-y-px"
+              key={q}
+              type="button"
+              onClick={() => send(undefined, q)}
+              disabled={working}
+              className="rounded-full bg-purple-50/70 hover:bg-purple-100/80 text-purple-700 px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50"
             >
-              <Plus className="h-4 w-4" />새 대화
+              {q}
             </button>
-          </div>
+          ))}
+        </div>
+        <label className="inline-flex shrink-0 cursor-pointer items-center space-x-1.5 bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1 rounded-full text-slate-600 text-[11px] font-medium transition-colors">
+          <svg className="w-3 h-3 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path
+              d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span>서류 첨부</span>
+          <input type="file" multiple accept=".pdf,image/*,.txt" onChange={onFiles} className="sr-only" />
+        </label>
+      </div>
+    </form>
+  );
 
-          <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
-            <div>
-              <SideLabel>히스토리</SideLabel>
-              {chats.length === 0 ? (
-                <p className="px-2 text-xs leading-relaxed text-slate-400">대화를 시작하면 여기에 저장됩니다.</p>
-              ) : (
-                <ul className="space-y-0.5">
-                  {chats.map((c) => (
-                    <li key={c.id} className="group relative">
-                      <button
-                        onClick={() => openChat(c.id)}
-                        aria-current={c.id === chatId}
-                        className={`block w-full truncate rounded-md py-1.5 pl-2 pr-8 text-left text-[13px] transition-colors ${
-                          c.id === chatId
-                            ? "bg-slate-200/80 font-medium text-slate-900"
-                            : "text-slate-700 hover:bg-slate-200/60"
-                        }`}
-                      >
-                        {c.title}
-                      </button>
-                      <button
-                        aria-label={`대화 삭제: ${c.title}`}
-                        onClick={() => deleteChat(c.id)}
-                        className="absolute right-1 top-1 hidden h-6 w-6 place-items-center rounded text-slate-400 hover:text-red-600 focus-visible:grid group-hover:grid"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+  return (
+    <div className="bg-ethereal-mesh min-h-dvh p-2 md:p-5 lg:p-6 flex items-center justify-center antialiased text-slate-800 selection:bg-brand-100 selection:text-brand-700">
+      <div className="w-full max-w-[1380px] h-[calc(100dvh-1rem)] md:h-[calc(100dvh-2.5rem)] lg:h-[calc(100dvh-3rem)] max-h-[860px] bg-white rounded-[2rem] shadow-app border border-white/60 flex overflow-hidden backdrop-blur-md">
+        {/* ───────── 사이드바 (Cortex LeftSidebar) ───────── */}
+        {sidebarOpen && (
+          <aside className="w-[270px] shrink-0 bg-[#fbfbfb] border-r border-slate-100 flex flex-col justify-between p-4 selection:bg-purple-200 max-lg:hidden">
+            <div className="flex flex-col space-y-4">
+              <div className="flex items-center justify-between px-1.5 pt-1">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-purple-200/70 flex items-center justify-center text-purple-700 shadow-sm">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M11 2a2 2 0 0 1 2 2v6h6a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-6v6a2 2 0 0 1-2 2v0a2 2 0 0 1-2-2v-6H3a2 2 0 0 1-2-2v0a2 2 0 0 1 2-2h6V4a2 2 0 0 1 2-2v0z" />
+                    </svg>
+                  </div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="font-semibold text-[17px] tracking-tight text-slate-900">공고패스</span>
+                    <span className="text-[11px] font-medium text-purple-600">Cortex</span>
+                  </div>
+                </div>
+                <button
+                  aria-label="사이드바 닫기"
+                  onClick={() => setSidebarOpen(false)}
+                  className="text-slate-400 hover:text-slate-700 transition-colors p-1.5 rounded-lg hover:bg-slate-100"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                    <rect height="18" rx="2" stroke="currentColor" width="18" x="3" y="3" />
+                    <path d="M9 3v18M14 9l-3 3 3 3" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </div>
+
+              <button
+                onClick={newChat}
+                className="w-full bg-[#121212] hover:bg-black text-white text-xs font-medium py-2.5 px-4 rounded-xl flex items-center justify-center space-x-2 shadow-sm transition-all duration-150"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
+                  <path d="M12 4v16m8-8H4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>새 대화</span>
+              </button>
+
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path
+                      d="M21 21l-4.35-4.35M16.65 11a5.65 5.65 0 11-11.3 0 5.65 5.65 0 0111.3 0z"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+                <input
+                  value={sidebarSearch}
+                  onChange={(e) => setSidebarSearch(e.target.value)}
+                  className="w-full text-xs pl-8 pr-8 py-2 bg-slate-100/80 hover:bg-slate-100 focus:bg-white border border-transparent focus:border-slate-300 rounded-xl focus:outline-none transition-colors placeholder:text-slate-400 text-slate-700"
+                  placeholder="대화 · 도구 검색"
+                  type="text"
+                />
+                <div className="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none">
+                  <span className="text-[11px] text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100 font-medium">
+                    ⌘
+                  </span>
+                </div>
+              </div>
+
+              <nav className="space-y-0.5 pt-1 text-xs text-slate-700">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setView("triage");
+                    setCanvasOpen(true);
+                  }}
+                  className="w-full flex items-center space-x-3 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors font-medium text-left"
+                >
+                  <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" />
+                    <path
+                      d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span>자격 판정 탐색</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setView("recipe");
+                    setCanvasOpen(true);
+                  }}
+                  className="w-full flex items-center space-x-3 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors font-medium text-left"
+                >
+                  <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span>서류 발급 가이드</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setView("audit");
+                    setCanvasOpen(true);
+                  }}
+                  className="w-full flex items-center space-x-3 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors font-medium text-left"
+                >
+                  <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                    <path
+                      d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-4l-2 3h-4l-2-3H4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span>사전 검수 · 파일</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setView("tools");
+                    setCanvasOpen(true);
+                  }}
+                  className="w-full flex items-center space-x-3 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors font-medium text-left"
+                >
+                  <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                    <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span>실행 내역 · 기록</span>
+                </button>
+              </nav>
             </div>
 
-            <div>
-              <SideLabel>내 도구</SideLabel>
-              <ul className="space-y-0.5">
-                {myTools.map((t) => (
-                  <li key={t.id}>
+            <div className="flex-1 overflow-y-auto no-scrollbar pt-4 text-xs space-y-4 pr-1">
+              <div>
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block px-2.5 mb-1.5">
+                  히스토리
+                </span>
+                {filteredChats.length === 0 ? (
+                  <p className="px-2.5 py-1 text-[11px] leading-relaxed text-slate-400">
+                    대화를 시작하면 여기에 저장됩니다.
+                  </p>
+                ) : (
+                  <div className="space-y-0.5">
+                    {filteredChats.map((c) => (
+                      <div key={c.id} className="group relative">
+                        <button
+                          onClick={() => openChat(c.id)}
+                          aria-current={c.id === chatId}
+                          className={`block w-full text-left px-2.5 py-1.5 pr-7 rounded-lg truncate transition-colors ${
+                            c.id === chatId
+                              ? "bg-purple-100/70 font-medium text-purple-900"
+                              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                          }`}
+                        >
+                          {c.title}
+                        </button>
+                        <button
+                          aria-label={`대화 삭제: ${c.title}`}
+                          onClick={() => deleteChat(c.id)}
+                          className="absolute right-1 top-1 hidden h-6 w-6 place-items-center rounded text-slate-400 hover:text-red-600 focus-visible:grid group-hover:grid"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block px-2.5 mb-1.5">
+                  내 도구 · 정부 사이트
+                </span>
+                <div className="space-y-0.5">
+                  {filteredTools.map((t) => (
                     <a
+                      key={t.id}
                       href={t.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] text-slate-700 transition-colors hover:bg-slate-200/60"
+                      className="group flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors"
                     >
                       <span className="truncate">{t.name}</span>
-                      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-300 group-hover:text-slate-600" />
+                      <ExternalLink className="h-3 w-3 shrink-0 text-slate-300 group-hover:text-purple-600" />
                     </a>
-                  </li>
-                ))}
-              </ul>
-              <button
+                  ))}
+                  <button
+                    onClick={() => setShowTools(true)}
+                    className="mt-1 flex w-full items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-purple-700 hover:bg-purple-50 font-medium transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>도구 추가 · 관리</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 mt-auto border-t border-slate-100">
+              <div
                 onClick={() => setShowTools(true)}
-                className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] font-medium text-brand-700 hover:bg-slate-200/60"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") setShowTools(true);
+                }}
+                className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
               >
-                <Plus className="h-3.5 w-3.5" />
-                도구 추가 · 관리
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-600 to-purple-300 flex items-center justify-center text-white text-xs font-semibold ring-1 ring-slate-200 shrink-0">
+                    AI
+                  </div>
+                  <div className="truncate">
+                    <p className="text-xs font-medium text-slate-800 truncate leading-tight">연결 및 개인정보 설정</p>
+                    <p className="text-[11px] text-slate-400 truncate leading-tight mt-0.5 flex items-center gap-1.5">
+                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${apiConnected ? "bg-emerald-500" : "bg-slate-400"}`} />
+                      {apiConnected ? "Gemini AI 연결됨" : "기본 규칙 검수 모드"}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-slate-400 hover:text-slate-700 transition-colors p-1">
+                  <Plug className="w-4 h-4" />
+                </span>
+              </div>
+            </div>
+          </aside>
+        )}
+
+        {/* ───────── 메인 워크스페이스 (Cortex MainWorkspace) ───────── */}
+        <main className="flex-1 flex flex-col bg-white overflow-hidden relative justify-between min-w-0">
+          <header className="h-16 px-6 shrink-0 flex items-center justify-between border-b border-transparent">
+            <div className="flex items-center gap-2">
+              {!sidebarOpen && (
+                <IconButton label="사이드바 열기" onClick={() => setSidebarOpen(true)} className="max-lg:hidden">
+                  <PanelLeft className="h-4 w-4" />
+                </IconButton>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setView("triage");
+                  setCanvasOpen(true);
+                }}
+                className="inline-flex items-center space-x-2 bg-slate-50 hover:bg-slate-100 border border-slate-200/80 px-2.5 py-1.5 rounded-full text-xs font-medium text-slate-800 transition-all"
+              >
+                <div className="w-4 h-4 rounded-md bg-purple-200 flex items-center justify-center text-purple-700 text-[10px]">
+                  ✦
+                </div>
+                <span>Cortex · {policy.title}</span>
+                <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </button>
             </div>
-          </nav>
 
-          <div className="border-t border-slate-200 p-3">
-            <button
-              onClick={() => setShowTools(true)}
-              className="flex w-full items-center justify-between rounded-md px-2 py-2 text-[13px] text-slate-700 hover:bg-slate-200/60"
-            >
-              <span className="flex items-center gap-2">
-                <Plug className="h-4 w-4 text-slate-500" />
-                연결 설정
-              </span>
-              <span className="flex items-center gap-1.5 text-xs text-slate-500">
-                <span className={`h-1.5 w-1.5 rounded-full ${apiConnected ? "bg-emerald-500" : "bg-slate-400"}`} />
-                {apiConnected ? "AI 연결됨" : "AI 미연결"}
-              </span>
-            </button>
-          </div>
-        </aside>
-      )}
-
-      {/* ───────── 대화 ───────── */}
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 px-4">
-          <div className="flex items-center gap-2">
-            {!sidebarOpen && (
-              <IconButton label="사이드바 열기" onClick={() => setSidebarOpen(true)} className="max-lg:hidden">
-                <PanelLeft className="h-4 w-4" />
-              </IconButton>
-            )}
-            <h1 className="text-sm font-semibold">제출 전 사전 점검</h1>
-            <span className="hidden text-xs text-slate-500 sm:inline">· {policy.title}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            {messages.length > 0 && (
+            <div className="flex items-center space-x-2">
               <button
-                onClick={newChat}
-                className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] text-slate-600 hover:bg-slate-100"
+                type="button"
+                aria-label="도구와 연결 설정"
+                onClick={() => setShowTools(true)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
               >
-                <Plus className="h-4 w-4" />새 대화
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <circle cx="5" cy="12" fill="currentColor" r="1" />
+                  <circle cx="12" cy="12" fill="currentColor" r="1" />
+                  <circle cx="19" cy="12" fill="currentColor" r="1" />
+                </svg>
               </button>
-            )}
-            {!canvasOpen && (
-              <IconButton label="결과 패널 열기" onClick={() => setCanvasOpen(true)}>
-                <PanelRight className="h-4 w-4" />
-              </IconButton>
-            )}
-          </div>
-        </header>
+              {messages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={newChat}
+                  title="새 대화"
+                  className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={downloadPackage}
+                className="inline-flex items-center space-x-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              >
+                <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="max-sm:hidden">{downloaded ? "내려받음" : "점검 요약 내보내기"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCanvasOpen((v) => !v)}
+                className="bg-[#121212] hover:bg-black text-white px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm"
+              >
+                {canvasOpen ? "패널 닫기" : "점검 패널"}
+              </button>
+            </div>
+          </header>
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-2xl px-5 py-8">
-            {messages.length === 0 ? (
-              <div className="pt-6">
-                <h2 className="text-[26px] font-semibold leading-tight tracking-tight text-balance">
-                  지원금 신청서, 내기 전에 먼저 점검하세요
-                </h2>
-                <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-slate-600">
-                  공고문 조건으로 자격을 계산하고, 준비한 서류를 접수 기준에 맞춰 검수합니다. 조건을 입력하거나
-                  서류를 첨부하면 바로 시작합니다.
-                </p>
+          <div className="flex-1 overflow-y-auto no-scrollbar">
+            <div className="px-6 md:px-8 max-w-3xl mx-auto w-full flex flex-col items-center pt-2 pb-6">
+              {messages.length === 0 ? (
+                <div className="w-full flex flex-col items-center">
+                  <div className="flex flex-col items-center text-center mb-5">
+                    <LiquidOrb />
+                    <h2 className="text-xl font-medium text-brand-400 tracking-tight mb-1">
+                      Hello, 공고패스 Cortex
+                    </h2>
+                    <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                      지원금 신청서, 내기 전에 먼저 점검하세요
+                    </h1>
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      공고문 조건으로 자격을 계산하고 준비한 서류를 접수 기준에 맞춰 제출 전에 검수합니다.
+                    </p>
+                  </div>
 
-                <div className="mt-8 divide-y divide-slate-200 rounded-lg border border-slate-200">
-                  {(["triage", "recipe", "audit_defect", "audit_fixed"] as MissionKey[]).map((k) => (
-                    <button
-                      key={k}
-                      onClick={() => runMission(k)}
-                      className="group flex w-full items-center gap-4 px-4 py-3.5 text-left transition-colors first:rounded-t-lg last:rounded-b-lg hover:bg-slate-50"
-                    >
-                      <span className="tnum w-4 text-sm font-medium text-slate-400">{MISSIONS[k].no}</span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium">{MISSIONS[k].label}</span>
-                        <span className="block text-[13px] text-slate-500">{MISSIONS[k].sub}</span>
-                      </span>
-                      <ArrowRight className="h-4 w-4 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-slate-600" />
-                    </button>
-                  ))}
-                </div>
+                  <div className="w-full mb-5">{promptCard}</div>
 
-                <div className="mt-6">
-                  <div className="text-xs font-medium text-slate-500">이렇게 물어볼 수 있어요</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {[
-                      "월세가 70만 원을 넘어도 받을 수 있나요?",
-                      "주민등록등본은 어디서 어떻게 발급하나요?",
-                      "국민취업지원제도는 누가 신청할 수 있나요?",
-                    ].map((q) => (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full">
+                    {(["triage", "recipe", "audit_defect", "audit_fixed"] as MissionKey[]).map((k, idx) => (
                       <button
-                        key={q}
-                        onClick={() => send(undefined, q)}
+                        key={k}
+                        onClick={() => runMission(k)}
                         disabled={working}
-                        className="rounded-full border border-slate-300 px-3 py-1.5 text-[13px] text-slate-700 transition-colors hover:bg-slate-50"
+                        className="p-3.5 text-left bg-slate-50/70 hover:bg-slate-50 border border-slate-100 rounded-xl hover:border-purple-200 transition-all group disabled:opacity-50"
                       >
-                        {q}
+                        <div className="mb-2 flex items-center justify-between text-slate-600 group-hover:text-purple-600 transition-colors">
+                          {idx === 0 && (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                              <path d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" strokeLinecap="round" strokeLinejoin="round" />
+                              <path d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          )}
+                          {idx === 1 && (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                              <path
+                                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          )}
+                          {idx === 2 && (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                              <path d="M19 11l-8 8-4-4M19 5l-8 8-4-4" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          )}
+                          {idx === 3 && (
+                            <FileCheck2 className="w-4 h-4" />
+                          )}
+                          <span className="tnum text-[10px] font-semibold text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">
+                            STEP {MISSIONS[k].no}
+                          </span>
+                        </div>
+                        <h4 className="text-xs font-semibold text-slate-800 mb-1">{MISSIONS[k].label}</h4>
+                        <p className="text-[11px] text-slate-400 leading-snug">{MISSIONS[k].sub}</p>
                       </button>
                     ))}
                   </div>
                 </div>
-
-                <p className="mt-6 text-xs leading-relaxed text-slate-500">
-                  위 4단계는 시연 시나리오입니다. 최종 판정은 접수 기관이 합니다.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-8">
-                {messages.map((msg) =>
-                  msg.role === "user" ? (
-                    <div key={msg.id} className="flex flex-col items-end gap-1.5">
-                      {msg.attachments && msg.attachments.length > 0 && (
-                        <div className="flex flex-wrap justify-end gap-1.5">
-                          {msg.attachments.map((a) => (
-                            <FileChip key={a} name={a} />
-                          ))}
+              ) : (
+                <div className="w-full space-y-6 py-2">
+                  {messages.map((msg) =>
+                    msg.role === "user" ? (
+                      <div key={msg.id} className="flex flex-col items-end gap-1.5">
+                        {msg.attachments && msg.attachments.length > 0 && (
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            {msg.attachments.map((a) => (
+                              <FileChip key={a} name={a} />
+                            ))}
+                          </div>
+                        )}
+                        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-purple-50/90 border border-purple-100 px-4 py-2.5 text-sm leading-relaxed text-slate-800">
+                          {msg.content}
                         </div>
-                      )}
-                      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-slate-100 px-4 py-2.5 text-sm leading-relaxed">
-                        {msg.content}
+                        <span className="text-[11px] text-slate-400">
+                          {msg.demo && "시연 시나리오 · "}
+                          {msg.time}
+                        </span>
                       </div>
-                      <span className="text-[11px] text-slate-400">
-                        {msg.demo && "시연 시나리오 · "}
-                        {msg.time}
-                      </span>
-                    </div>
-                  ) : (
-                    <div
-                      key={msg.id}
-                      className={`space-y-3 ${canvasOpen && view === "answer" && focusId === msg.id ? "-ml-4 border-l-2 border-brand-600 pl-[14px]" : ""}`}
-                    >
-                      {msg.pending ? (
-                        <div className="flex items-center gap-2 text-sm text-slate-500">
-                          <LoaderCircle className="h-4 w-4 animate-spin" />
-                          찾아보고 정리하는 중 · 보통 20초 안팎
-                        </div>
-                      ) : (
-                        <>
-                          {!msg.card && msg.traces && msg.traces.length > 0 && (
-                            <div className="rounded-lg border border-slate-200">
-                              <button
-                                onClick={() => setExpanded((e) => ({ ...e, [msg.id]: !e[msg.id] }))}
-                                aria-expanded={Boolean(expanded[msg.id])}
-                                className="flex w-full items-center justify-between px-3 py-2 text-left text-[13px] text-slate-600 hover:bg-slate-50"
+                    ) : (
+                      <div
+                        key={msg.id}
+                        className={`space-y-3 ${canvasOpen && view === "answer" && focusId === msg.id ? "-ml-4 border-l-2 border-brand-600 pl-[14px]" : ""}`}
+                      >
+                        {msg.pending ? (
+                          <div className="flex items-center gap-2 text-sm text-slate-500">
+                            <LoaderCircle className="h-4 w-4 animate-spin text-purple-600" />
+                            찾아보고 정리하는 중 · 보통 20초 안팎
+                          </div>
+                        ) : (
+                          <>
+                            {!msg.card && msg.traces && msg.traces.length > 0 && (
+                              <div className="rounded-xl border border-slate-200/90 bg-slate-50/40">
+                                <button
+                                  onClick={() => setExpanded((e) => ({ ...e, [msg.id]: !e[msg.id] }))}
+                                  aria-expanded={Boolean(expanded[msg.id])}
+                                  className="flex w-full items-center justify-between px-3 py-2 text-left text-[13px] text-slate-600 hover:bg-slate-50 rounded-xl"
+                                >
+                                  <span>도구 {msg.traces.length}개 실행</span>
+                                  <ChevronDown
+                                    className={`h-4 w-4 transition-transform ${expanded[msg.id] ? "rotate-180" : ""}`}
+                                  />
+                                </button>
+                                {expanded[msg.id] && (
+                                  <ul className="divide-y divide-slate-100 border-t border-slate-200">
+                                    {msg.traces.map((t) => (
+                                      <li key={t.step} className="flex items-center gap-3 px-3 py-2 text-[13px]">
+                                        <StatusDot status={t.status} />
+                                        <span className="min-w-0 flex-1">
+                                          <span className="block truncate text-slate-800">{t.title}</span>
+                                          <span className="block truncate text-xs text-slate-500">{t.basis}</span>
+                                        </span>
+                                        <SourceBadge source={t.source} />
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            )}
+
+                            {msg.card ? (
+                              <CardView card={msg.card} onAsk={(q) => send(undefined, q)} disabled={working} />
+                            ) : (
+                              <div
+                                className={`whitespace-pre-wrap text-sm leading-relaxed ${
+                                  msg.error
+                                    ? "rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-red-800"
+                                    : "text-slate-800"
+                                }`}
                               >
-                                <span>도구 {msg.traces.length}개 실행</span>
-                                <ChevronDown
-                                  className={`h-4 w-4 transition-transform ${expanded[msg.id] ? "rotate-180" : ""}`}
-                                />
+                                <Rich text={msg.content} />
+                              </div>
+                            )}
+
+                            {msg.card && (
+                              <button
+                                onClick={() => {
+                                  setFocusId(msg.id);
+                                  if (msg.card?.policies?.length) setCtx(`${msg.id}#0`);
+                                  setView("answer");
+                                  setCanvasOpen(true);
+                                }}
+                                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-brand-700"
+                              >
+                                <PanelRight className="h-3.5 w-3.5" />
+                                근거 보기 · 도구 {msg.traces?.length || 0}건 · 출처 {msg.sources?.length || 0}곳
                               </button>
-                              {expanded[msg.id] && (
-                                <ul className="divide-y divide-slate-100 border-t border-slate-200">
-                                  {msg.traces.map((t) => (
-                                    <li key={t.step} className="flex items-center gap-3 px-3 py-2 text-[13px]">
-                                      <StatusDot status={t.status} />
-                                      <span className="min-w-0 flex-1">
-                                        <span className="block truncate text-slate-800">{t.title}</span>
-                                        <span className="block truncate text-xs text-slate-500">{t.basis}</span>
-                                      </span>
-                                      <SourceBadge source={t.source} />
+                            )}
+
+                            {!msg.card && msg.sources && msg.sources.length > 0 && (
+                              <details className="group">
+                                <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-slate-500 hover:text-slate-800">
+                                  출처 {msg.sources.length}곳
+                                  {msg.sources.some((s) => s.registered) && " · 내 도구 포함"}
+                                  <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+                                </summary>
+                                <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                                  {msg.sources.map((s) => (
+                                    <li key={s.url}>
+                                      <a
+                                        href={s.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className={`inline-flex max-w-[16rem] items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-slate-50 ${
+                                          s.registered ? "border-brand-600/40 text-brand-700" : "border-slate-200 text-slate-600"
+                                        }`}
+                                      >
+                                        <span className="truncate">{s.title}</span>
+                                        {s.registered && <span className="shrink-0 font-medium">· 내 도구</span>}
+                                        <ExternalLink className="h-3 w-3 shrink-0" />
+                                      </a>
                                     </li>
                                   ))}
                                 </ul>
-                              )}
-                            </div>
-                          )}
+                              </details>
+                            )}
 
-                          {msg.card ? (
-                            <CardView card={msg.card} onAsk={(q) => send(undefined, q)} disabled={working} />
-                          ) : (
-                          <div
-                            className={`whitespace-pre-wrap text-sm leading-relaxed ${msg.error ? "rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-red-800" : "text-slate-800"}`}
-                          >
-                            <Rich text={msg.content} />
-                          </div>
-                          )}
+                            {msg.artifact && (
+                              <button
+                                onClick={() => {
+                                  setView(msg.artifact!.view);
+                                  setCanvasOpen(true);
+                                }}
+                                className="group flex w-full items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5 text-left transition-colors hover:border-purple-300 hover:bg-purple-50/40"
+                              >
+                                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-purple-100/70 text-purple-700">
+                                  <FileText className="h-4 w-4" />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-[13px] font-medium">{msg.artifact.title}</span>
+                                  <span className="block truncate text-xs text-slate-500">{msg.artifact.meta}</span>
+                                </span>
+                                <span className="text-xs text-purple-600 font-medium group-hover:text-purple-800">열기</span>
+                              </button>
+                            )}
 
-                          {msg.card && (
-                            <button
-                              onClick={() => {
-                                setFocusId(msg.id);
-                                if (msg.card?.policies?.length) setCtx(`${msg.id}#0`);
-                                setView("answer");
-                                setCanvasOpen(true);
-                              }}
-                              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-brand-700"
-                            >
-                              <PanelRight className="h-3.5 w-3.5" />
-                              근거 보기 · 도구 {msg.traces?.length || 0}건 · 출처 {msg.sources?.length || 0}곳
-                            </button>
-                          )}
-
-                          {!msg.card && msg.sources && msg.sources.length > 0 && (
-                            <details className="group">
-                              <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-slate-500 hover:text-slate-800">
-                                출처 {msg.sources.length}곳
-                                {msg.sources.some((s) => s.registered) && " · 내 도구 포함"}
-                                <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
-                              </summary>
-                              <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                                {msg.sources.map((s) => (
-                                  <li key={s.url}>
-                                    <a
-                                      href={s.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className={`inline-flex max-w-[16rem] items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-slate-50 ${s.registered ? "border-brand-600/40 text-brand-700" : "border-slate-200 text-slate-600"}`}
-                                    >
-                                      <span className="truncate">{s.title}</span>
-                                      {s.registered && <span className="shrink-0 font-medium">· 내 도구</span>}
-                                      <ExternalLink className="h-3 w-3 shrink-0" />
-                                    </a>
-                                  </li>
+                            {msg.followUps && msg.followUps.length > 0 && (
+                              <div className="flex flex-wrap gap-2">
+                                {msg.followUps.map((k) => (
+                                  <button
+                                    key={k}
+                                    onClick={() => runMission(k)}
+                                    disabled={working}
+                                    className="flex items-center gap-1.5 rounded-xl border border-purple-200 bg-purple-50/50 px-3 py-1.5 text-[13px] font-medium text-purple-700 transition-colors hover:bg-purple-100 active:translate-y-px disabled:opacity-50"
+                                  >
+                                    다음: {MISSIONS[k].label}
+                                    <ArrowRight className="h-3.5 w-3.5" />
+                                  </button>
                                 ))}
-                              </ul>
-                            </details>
-                          )}
-
-                          {msg.artifact && (
-                            <button
-                              onClick={() => {
-                                setView(msg.artifact!.view);
-                                setCanvasOpen(true);
-                              }}
-                              className="group flex w-full items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 text-left transition-colors hover:border-slate-300 hover:bg-slate-50"
-                            >
-                              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-slate-100 text-slate-600">
-                                <FileText className="h-4 w-4" />
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-[13px] font-medium">{msg.artifact.title}</span>
-                                <span className="block truncate text-xs text-slate-500">{msg.artifact.meta}</span>
-                              </span>
-                              <span className="text-xs text-slate-500 group-hover:text-slate-800">열기</span>
-                            </button>
-                          )}
-
-                          {msg.followUps && msg.followUps.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
-                              {msg.followUps.map((k) => (
-                                <button
-                                  key={k}
-                                  onClick={() => runMission(k)}
-                                  disabled={working}
-                                  className="flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-[13px] font-medium text-slate-700 transition-colors hover:bg-slate-50 active:translate-y-px disabled:opacity-50"
-                                >
-                                  다음: {MISSIONS[k].label}
-                                  <ArrowRight className="h-3.5 w-3.5" />
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-            <div ref={endRef} />
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+              <div ref={endRef} />
+            </div>
           </div>
-        </div>
 
-        {/* 입력창 */}
-        <div className="shrink-0 px-5 pb-5">
-          <form
-            onSubmit={send}
-            className="mx-auto w-full max-w-2xl rounded-xl border border-slate-300 bg-white shadow-sm transition-shadow focus-within:border-slate-400 focus-within:shadow"
-          >
-            {staged.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 px-3 pt-3">
-                {staged.map((f, i) => (
-                  <FileChip
-                    key={`${f.fileName}-${i}`}
-                    name={f.fileName}
-                    onRemove={() => setStaged((prev) => prev.filter((_, j) => j !== i))}
-                  />
-                ))}
-              </div>
-            )}
-            <textarea
-              rows={2}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              aria-label="메시지 입력"
-              placeholder="청년 정책을 물어보거나 공고문·서류를 첨부하세요"
-              className="block w-full resize-none bg-transparent px-4 pt-3 text-sm placeholder:text-slate-400 focus:outline-none"
-            />
-            <div className="flex items-center justify-between px-2.5 pb-2.5">
-              <label className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-slate-600 hover:bg-slate-100">
-                <Paperclip className="h-4 w-4" />
-                서류 첨부
-                <input type="file" multiple accept=".pdf,image/*,.txt" onChange={onFiles} className="sr-only" />
-              </label>
+          {messages.length > 0 && (
+            <div className="shrink-0 px-6 md:px-8 pb-3 max-w-3xl mx-auto w-full">{promptCard}</div>
+          )}
+
+          <footer className="h-11 px-6 shrink-0 flex items-center justify-between border-t border-transparent text-[11px] text-slate-400">
+            <div className="w-16 max-sm:hidden" />
+            <p className="text-center truncate">
+              사전 점검 도우미 결과이며 최종 판정은 접수 기관이 합니다 ·{" "}
+              <button type="button" onClick={() => setShowTools(true)} className="text-purple-600 hover:underline">
+                API 및 사이트 연결 설정
+              </button>
+            </p>
+            <div className="flex items-center space-x-2">
               <button
-                type="submit"
-                disabled={working || (!input.trim() && !staged.length)}
-                aria-label="보내기"
-                className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white transition-colors hover:bg-brand-700 active:translate-y-px disabled:bg-slate-200 disabled:text-slate-400"
+                type="button"
+                aria-label="주민번호 마스킹 전환"
+                title={maskOnScreen ? "주민번호 마스킹 켜짐" : "주민번호 마스킹 꺼짐"}
+                onClick={() => setMaskOnScreen((v) => !v)}
+                className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors text-xs font-serif shadow-sm ${
+                  maskOnScreen
+                    ? "border-purple-200 bg-purple-50 text-purple-700"
+                    : "border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-800"
+                }`}
               >
-                {working ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+                文A
+              </button>
+              <button
+                type="button"
+                aria-label="도구 및 도움말"
+                onClick={() => setShowTools(true)}
+                className="w-7 h-7 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors text-xs font-medium shadow-sm"
+              >
+                ?
               </button>
             </div>
-          </form>
-        </div>
-      </main>
+          </footer>
+        </main>
 
       {/* ───────── 결과 패널 ───────── */}
       {canvasOpen && (
@@ -1320,7 +1635,7 @@ export default function Page() {
                                   name={q.id}
                                   checked={on}
                                   onChange={() => setAnswers((a) => ({ ...a, [q.id]: o.value }))}
-                                  className="mt-0.5 accent-[#2558D9]"
+                                  className="mt-0.5 accent-brand-600"
                                 />
                                 <span>
                                   {o.label}
@@ -1406,7 +1721,7 @@ export default function Page() {
                             aria-label={`${d.title} 발급 완료`}
                             checked={Boolean(doneDocs[d.id])}
                             onChange={() => setDoneDocs((s) => ({ ...s, [d.id]: !s[d.id] }))}
-                            className="mt-1 h-4 w-4 accent-[#2558D9]"
+                            className="mt-1 h-4 w-4 accent-brand-600"
                           />
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1791,11 +2106,199 @@ export default function Page() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
 
 /* ───────── 작은 구성 요소 ───────── */
+
+function LiquidOrb() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    function syncSize() {
+      if (!canvas) return;
+      const w = canvas.clientWidth || 144;
+      const h = canvas.clientHeight || 144;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+    }
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(syncSize);
+      ro.observe(canvas);
+    }
+    syncSize();
+
+    const gl = (canvas.getContext("webgl") || canvas.getContext("experimental-webgl")) as WebGLRenderingContext | null;
+    if (!gl) return () => ro?.disconnect();
+
+    const vs = `attribute vec2 a_position;
+varying vec2 v_texCoord;
+void main() {
+  v_texCoord = a_position * 0.5 + 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}`;
+    const fs = `precision highp float;
+uniform float u_time;
+uniform vec2 u_resolution;
+uniform vec2 u_mouse;
+varying vec2 v_texCoord;
+
+vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+float snoise(vec2 v) {
+    const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+             -0.577350269189626, 0.024390243902439);
+    vec2 i  = floor(v + dot(v, C.yy) );
+    vec2 x0 = v -   i + dot(i, C.xx);
+    vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    vec4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = mod289(i);
+    vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
+        + i.x + vec3(0.0, i1.x, 1.0 ));
+    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+    m = m*m ;
+    m = m*m ;
+    vec3 x = 2.0 * fract(p * C.www) - 1.0;
+    vec3 h = abs(x) - 0.5;
+    vec3 ox = floor(x + 0.5);
+    vec3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+    vec3 g;
+    g.x  = a0.x  * x0.x  + h.x  * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
+}
+
+void main() {
+    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
+    float t = u_time * 1.2;
+
+    float r = length(uv);
+    float angle = atan(uv.y, uv.x);
+
+    float baseRadius = 0.28;
+    float wave1 = sin(angle * 3.0 + t * 1.5) * 0.028;
+    float wave2 = cos(angle * 5.0 - t * 2.1) * 0.018;
+    float wave3 = sin(angle * 2.0 + t * 0.9) * 0.022;
+    float noiseWave = snoise(uv * 3.5 + vec2(t * 0.4, -t * 0.3)) * 0.025;
+    float fluidRadius = baseRadius + wave1 + wave2 + wave3 + noiseWave;
+    float dist = r - fluidRadius;
+    float dropletMask = smoothstep(0.015, -0.015, dist);
+
+    if (dropletMask <= 0.001) {
+        float ambientGlow = exp(-r * 6.5) * 0.45;
+        vec3 glowCol = vec3(0.65, 0.45, 0.95);
+        gl_FragColor = vec4(glowCol, ambientGlow * smoothstep(0.5, 0.28, r));
+        return;
+    }
+
+    float normDist = clamp(r / fluidRadius, 0.0, 1.0);
+    float z = sqrt(max(0.0, 1.0 - normDist * normDist));
+    float internalRipple = sin(r * 26.0 - t * 3.5) * 0.04 * (1.0 - normDist);
+    internalRipple += snoise(uv * 7.0 + vec2(t * 0.6, t * 0.8)) * 0.035;
+
+    vec3 N = normalize(vec3(uv.x / fluidRadius + internalRipple, uv.y / fluidRadius + internalRipple, z));
+    vec3 L1 = normalize(vec3(-0.45, 0.65, 0.85));
+    vec3 L2 = normalize(vec3(0.55, -0.4, 0.6));
+    vec3 V = vec3(0.0, 0.0, 1.0);
+
+    float diff1 = max(dot(N, L1), 0.0);
+    vec3 H1 = normalize(L1 + V);
+    float spec1 = pow(max(dot(N, H1), 0.0), 38.0);
+    vec3 H2 = normalize(L2 + V);
+    float spec2 = pow(max(dot(N, H2), 0.0), 16.0);
+    float fresnel = pow(1.0 - max(dot(N, V), 0.0), 2.8);
+
+    vec3 deepWater = vec3(0.48, 0.24, 0.86);
+    vec3 clearLavender = vec3(0.78, 0.66, 0.98);
+    vec3 waterHighlight = vec3(0.96, 0.94, 1.0);
+    vec3 waterCore = vec3(0.62, 0.38, 0.92);
+
+    vec3 col = mix(deepWater, clearLavender, diff1 * 0.7 + z * 0.5);
+    col += waterCore * (1.0 - normDist) * 0.4;
+    float caustics = pow(max(0.0, sin(r * 22.0 - t * 2.8) * cos(angle * 4.0 + t)), 2.0) * 0.25 * z;
+    col += vec3(0.85, 0.75, 1.0) * caustics;
+    col += waterHighlight * (spec1 * 1.35 + spec2 * 0.4);
+    col = mix(col, vec3(0.92, 0.88, 1.0), fresnel * 0.75);
+
+    float alpha = clamp(0.72 + fresnel * 0.26 + spec1 * 0.5, 0.0, 0.98);
+    alpha *= dropletMask;
+
+    gl_FragColor = vec4(col, alpha);
+}`;
+
+    function cs(type: number, src: string) {
+      const s = gl!.createShader(type)!;
+      gl!.shaderSource(s, src);
+      gl!.compileShader(s);
+      return s;
+    }
+    const prog = gl.createProgram()!;
+    gl.attachShader(prog, cs(gl.VERTEX_SHADER, vs));
+    gl.attachShader(prog, cs(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const pos = gl.getAttribLocation(prog, "a_position");
+    gl.enableVertexAttribArray(pos);
+    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+    const uTime = gl.getUniformLocation(prog, "u_time");
+    const uRes = gl.getUniformLocation(prog, "u_resolution");
+    const uMouse = gl.getUniformLocation(prog, "u_mouse");
+
+    const mouse = { x: canvas.width / 2, y: canvas.height / 2 };
+    const onMove = (event: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width && rect.height) {
+        const nx = (event.clientX - rect.left) / rect.width;
+        const ny = 1.0 - (event.clientY - rect.top) / rect.height;
+        mouse.x = nx * canvas.width;
+        mouse.y = ny * canvas.height;
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+
+    let raf = 0;
+    function render(t: number) {
+      if (!canvas || !gl) return;
+      if (typeof ResizeObserver === "undefined") syncSize();
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      if (uTime) gl.uniform1f(uTime, t * 0.001);
+      if (uRes) gl.uniform2f(uRes, canvas.width, canvas.height);
+      if (uMouse) gl.uniform2f(uMouse, mouse.x, mouse.y);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      raf = requestAnimationFrame(render);
+    }
+    raf = requestAnimationFrame(render);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("mousemove", onMove);
+      ro?.disconnect();
+    };
+  }, []);
+
+  return (
+    <div className="w-36 h-36 mx-auto mb-3 relative z-10">
+      <canvas ref={canvasRef} className="block w-full h-full" />
+    </div>
+  );
+}
 
 function CardView({ card, onAsk, disabled }: { card: AnswerCard; onAsk: (q: string) => void; disabled: boolean }) {
   return (
@@ -2483,7 +2986,7 @@ function PolicyDocs({
                     aria-label={`${d.name} 준비 완료`}
                     checked={Boolean(docs[i])}
                     onChange={() => onChange({ docs: { ...docs, [i]: !docs[i] } })}
-                    className="mt-0.5 h-4 w-4 accent-[#2558D9]"
+                    className="mt-0.5 h-4 w-4 accent-brand-600"
                   />
                   <div className="min-w-0 flex-1">
                     <div className={`text-[13px] font-medium ${docs[i] ? "text-slate-400 line-through" : "text-slate-900"}`}>{d.name}</div>
