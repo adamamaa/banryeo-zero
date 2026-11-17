@@ -999,9 +999,12 @@ export default function Page() {
             </svg>
             <span>전체 점검 실행</span>
           </button>
-          <label className="inline-flex shrink-0 cursor-pointer items-center space-x-1.5 bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1 rounded-full text-slate-600 text-xs font-medium transition-colors">
+          <label
+            aria-label="서류 첨부"
+            title="서류 첨부"
+            className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-slate-100 text-slate-600 transition-colors hover:bg-slate-200/80"
+          >
             <Paperclip className="w-3.5 h-3.5 text-slate-500" />
-            <span>서류 첨부</span>
             <input type="file" multiple accept=".pdf,image/*,.txt" onChange={onFiles} className="sr-only" />
           </label>
         </div>
