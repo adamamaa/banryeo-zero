@@ -3,7 +3,7 @@
 import { isNegativeAnswer, parseCard } from "./card";
 import { resolveAlternatives, type AltCandidate } from "./alternatives";
 import { benefitExcerpt, findAmountIssues, pickOfficial, type OfficialRecord } from "./officialFacts";
-import type { EligibilitySummary } from "./agent";
+import type { EligibilitySummary } from "./eligibility";
 
 export interface VerifyCheck {
   name: string;
@@ -19,10 +19,6 @@ export interface Verification {
   checks: VerifyCheck[];
 }
 
-const won = (n: number) => `${Math.round(n).toLocaleString("ko-KR")}원`;
-const num = (s: string) => Number(s.replace(/,/g, ""));
-// 공고 기준선으로 자주 쓰는 비율은 계산값과 달라도 정상 (예: "중위소득 60% 이하")
-const THRESHOLD_PERCENTS = [48, 50, 60, 100, 120, 150, 180];
 // 정부·공공기관 도메인 (정부24는 gov.kr)
 const OFFICIAL_HOST = /(^|\.)(go\.kr|or\.kr|gov\.kr)$/;
 // "엑셀로 정리해줘", "워드 파일 만들어 줘", "csv로 뽑아줘", "캘린더 파일 줘" 같은 요청
@@ -73,41 +69,33 @@ export function verifyAnswer(
   // 2. 수치: 자격 계산 도구 결과와 같은지
   if (s) {
     const wrong: string[] = [];
-    for (const m of Array.from(text.matchAll(/중위[^%]{0,40}?(\d{1,3}(?:\.\d+)?)\s*%/g))) {
-      const v = Number(m[1]);
-      if (Math.abs(v - s.medianRatioPercent) > 0.2 && !THRESHOLD_PERCENTS.includes(v)) wrong.push(`${v}%`);
-    }
-    const okAmounts = [s.totalConvertedRentKRW, s.convertedDepositKRW, 900_000];
-    for (const m of Array.from(text.matchAll(/환산[^0-9]{0,30}(\d[\d,]*(?:\.\d+)?)\s*(만\s*)?원/g))) {
-      const v = m[2] ? Number(m[1]) * 10000 : num(m[1]);
-      if (!okAmounts.some((x) => Math.abs(v - x) <= (m[2] ? 5000 : 1000))) wrong.push(m[2] ? `${m[1]}만 원` : `${m[1]}원`);
+    if (s.percents.length) {
+      for (const m of Array.from(text.matchAll(/중위[^%]{0,40}?(\d{1,3}(?:\.\d+)?)\s*%/g))) {
+        const v = Number(m[1]);
+        if (!s.percents.some((p) => Math.abs(v - p) <= 0.2)) wrong.push(`${v}%`);
+      }
     }
     checks.push(
       wrong.length
         ? {
             name: "계산 수치",
             ok: false,
-            note: `계산 결과(본인 소득 비율 ${s.medianRatioPercent}%, 환산 합산 월세 ${won(s.totalConvertedRentKRW)})와 다른 수치(${wrong.join(", ")})를 썼습니다. 도구 결과 수치로 고치세요.`,
+            note: `자격 확인 결과와 공고 기준(${s.percents.join("%, ")}%)에 없는 수치(${wrong.join(", ")})를 썼습니다. 도구 결과 수치로 고치세요.`,
             severity: "fix",
           }
-        : {
-            name: "계산 수치",
-            ok: true,
-            note: `자격 계산 결과(${s.medianRatioPercent}%, ${won(s.totalConvertedRentKRW)})와 일치`,
-            severity: "fix",
-          }
+        : { name: "계산 수치", ok: true, note: `${s.policyName} 자격 확인 결과와 일치`, severity: "fix" }
     );
 
-    // 3. 판정: 계산 결과와 반대로 말하지 않는지
+    // 3. 판정: 대조 결과와 반대로 말하지 않는지
     const positive = /(신청\s*대상(에|입니다|이에요|이 됩니다)|받을\s*수\s*있(어요|습니다)|자격(을|이)\s*충족)/.test(text);
     const negative = /(대상이\s*아니|요건을\s*충족하지\s*못|받을\s*수\s*없|부적격)/.test(text);
-    const mentionsParent = /부모|원가구/.test(text);
+    const mentionsCheck = /확인|추가|남아|필요/.test(text);
     let verdictIssue = "";
-    if (s.verdict === "ineligible" && positive && !negative) verdictIssue = "계산 결과는 '요건 미충족'인데 신청 대상이라고 안내했습니다.";
-    else if (s.verdict === "eligible" && negative && !positive) verdictIssue = "계산 결과는 '신청 대상'인데 대상이 아니라고 안내했습니다.";
-    else if (s.verdict === "needs_parent_check" && positive && !mentionsParent)
-      verdictIssue = "계산 결과는 '부모님 소득 확인 필요'인데 확정적으로 대상이라고 안내했습니다. 부모님 소득 확인이 남았다고 밝히세요.";
-    const verdictLabel = { eligible: "신청 대상", needs_parent_check: "부모님 소득 확인 필요", ineligible: "요건 미충족" }[s.verdict];
+    if (s.verdict === "ineligible" && positive && !negative) verdictIssue = "대조 결과는 '미충족 조건 있음'인데 신청 대상이라고 안내했습니다.";
+    else if (s.verdict === "eligible" && negative && !positive) verdictIssue = "대조 결과는 '확인한 조건 충족'인데 대상이 아니라고 안내했습니다.";
+    else if (s.verdict === "needs_check" && positive && !mentionsCheck)
+      verdictIssue = "확인이 남은 조건이 있는데 확정적으로 대상이라고 안내했습니다. 남은 조건을 밝히세요.";
+    const verdictLabel = { eligible: "확인한 조건 충족", needs_check: "확인이 더 필요", ineligible: "미충족 조건 있음" }[s.verdict];
     checks.push(
       verdictIssue
         ? { name: "판정 일치", ok: false, note: verdictIssue, severity: "fix" }
@@ -121,7 +109,7 @@ export function verifyAnswer(
     const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
     if (Number.isNaN(d.getTime()) || d >= todayYmd) continue;
     const around = text.slice(Math.max(0, (m.index ?? 0) - 20), (m.index ?? 0) + m[0].length + 20);
-    if (/(마감|까지|기한)/.test(around) && !/(마감됐|마감되었|마감된|종료|지났|끝났|이미|지난)/.test(around)) past.push(m[0].trim());
+    if (/(마감|까지|기한)/.test(around) && !/(마감됐|마감되었|마감된|종료|지났|끝났|이미|지난|불가)/.test(around)) past.push(m[0].trim());
   }
   checks.push(
     past.length

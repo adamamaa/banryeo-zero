@@ -4,7 +4,9 @@
 // 키는 서버 환경변수 YOUTHCENTER_API_KEY (온통청년 마이페이지 > OPEN API에서 발급)를 쓴다.
 import { splitDocs, type Gov24Notice } from "./gov24";
 import { mentionsOtherSigungu } from "@/data/regions";
+import { PERIOD_UNKNOWN, trustedPeriod } from "./deadline";
 import { ymdOf, type OfficialRecord } from "./officialFacts";
+import { relevanceScore } from "./relevance";
 
 const ENDPOINT = "https://www.youthcenter.go.kr/go/ythip/getPlcy";
 
@@ -68,6 +70,7 @@ export interface YouthQuery {
   sigungu?: string;
   age?: number | null;
   job?: string;
+  housing?: string;
   marriage?: string;
   children?: string;
   education?: string;
@@ -93,6 +96,17 @@ export function pickPeriod(aplyYmd: string): { start?: string; end?: string } {
     .filter((r) => r.end >= today)
     .sort((a, b) => a.end.localeCompare(b.end));
   return rounds[0] ? { start: ymd(rounds[0].start), end: ymd(rounds[0].end) } : {};
+}
+
+// 실제 접수 기간으로 믿을 수 있는 회차 (사업 기간을 그대로 적은 값은 마감일로 쓰지 않는다)
+function applyPeriod(r: Row) {
+  const raw = s(r.aplyYmd, 400);
+  const period = pickPeriod(raw);
+  const compact = (v?: string) => (v || "").replace(/-/g, "");
+  const single = (raw.match(/\d{8}\s*~\s*\d{8}/g) || []).length === 1;
+  const sameAsBusiness =
+    single && compact(period.start) === s(r.bizPrdBgngYmd) && compact(period.end) === s(r.bizPrdEndYmd);
+  return trustedPeriod(period, { sameAsBusiness });
 }
 
 // 내 정보와 맞지 않는 정책을 거르고, 맞는 정도로 점수를 매긴다 (-1이면 제외)
@@ -146,7 +160,7 @@ export function scorePolicy(r: Row, q: YouthQuery): number {
   if ((q.interests || []).some((i) => INTEREST_CLASS[i] && cls.includes(INTEREST_CLASS[i]))) score += 2;
 
   // 곧 마감
-  const period = pickPeriod(s(r.aplyYmd, 400));
+  const period = applyPeriod(r);
   if (period.end) {
     const left = (new Date(`${period.end}T00:00:00`).getTime() - Date.now()) / 86400000;
     if (left <= 14) score += 1;
@@ -156,7 +170,9 @@ export function scorePolicy(r: Row, q: YouthQuery): number {
 
 const toNotice = (r: Row): Gov24Notice => {
   const always = s(r.aplyPrdSeCd) === "0057002";
-  const { start, end } = always ? ({} as { start?: string; end?: string }) : pickPeriod(s(r.aplyYmd, 400));
+  const { start, end, uncertain } = always
+    ? { start: undefined, end: undefined, uncertain: false }
+    : applyPeriod(r);
   const no = s(r.plcyNo, 40);
   const url = /^https:\/\//.test(s(r.aplyUrlAddr)) ? s(r.aplyUrlAddr) : `https://www.youthcenter.go.kr/youthPolicy/ythPlcyTotalSearch/ythPlcyDetail/${no}`;
   return {
@@ -166,12 +182,18 @@ const toNotice = (r: Row): Gov24Notice => {
     org: s(r.sprvsnInstCdNm || r.operInstCdNm, 40),
     summary: s(r.plcySprtCn || r.plcyExplnCn, 160),
     target: [s(r.addAplyQlfcCndCn, 120), s(r.earnEtcCn, 60)].filter(Boolean).join(" · "),
-    deadlineText: always ? "상시 신청" : s(r.aplyYmd, 60).replace(/\\N/g, " / "),
+    deadlineText: always
+      ? "상시 신청"
+      : uncertain
+      ? PERIOD_UNKNOWN
+      : s(r.aplyYmd, 60).replace(/\\N/g, " / ").replace(/(\d{4})(\d{2})(\d{2})/g, "$1-$2-$3"),
     applyStart: start,
     applyEnd: end,
     docs: splitDocs(s(r.sbmsnDcmntCn, 800)),
     applyAt: s(r.operInstCdNm || r.sprvsnInstCdNm, 40),
     url,
+    // 대분류·키워드는 너무 넓어서('금융･복지･문화', '교육지원') 중분류만 쓴다
+    topics: s(r.mclsfNm, 30),
   };
 };
 
@@ -218,13 +240,22 @@ export async function officialYouth(key: string, name: string): Promise<Omit<Off
   const rows = await fetchPage(key, { plcyNm: name });
   return rows.map((r) => {
     const n = toNotice(r);
+    const minAge = s(r.sprtTrgtMinAge);
+    const maxAge = s(r.sprtTrgtMaxAge);
     return {
       source: "온통청년",
       name: n.name,
       org: n.org,
       updated: ymdOf(s(r.lastMdfcnDt, 20)),
       benefit: s(r.plcySprtCn || r.plcyExplnCn, 700),
-      target: n.target,
+      target: [
+        s(r.sprtTrgtAgeLmtYn) !== "Y" && Number(minAge) && Number(maxAge) ? `만 ${minAge}~${maxAge}세` : "",
+        s(r.addAplyQlfcCndCn, 500),
+        s(r.earnEtcCn, 300),
+        s(r.ptcpPrpTrgtCn, 300),
+      ]
+        .filter(Boolean)
+        .join(" "),
       deadline: n.deadlineText,
       url: n.url,
     };
@@ -276,12 +307,16 @@ export async function recommendYouth(
       seen.add(no);
       return true;
     })
-    .map((r) => ({ r, score: scorePolicy(r, q) }))
-    .filter((x) => x.score >= 0)
+    .map((r) => {
+      const notice = toNotice(r);
+      const fit = scorePolicy(r, q);
+      const related = relevanceScore(notice, q);
+      return { notice, fit, related, score: fit + related * 2 };
+    })
+    .filter((x) => x.fit >= 0 && x.related >= 0 && x.notice.id && x.notice.name)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
-    .map((x) => toNotice(x.r))
-    .filter((n) => n.id && n.name);
+    .slice(0, 10)
+    .map((x) => x.notice);
   cache.set(cacheKey, { at: Date.now(), data });
   return data;
 }

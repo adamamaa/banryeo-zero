@@ -28,6 +28,8 @@ import type { AnswerCard, PolicyDetail } from "@/lib/card";
 import type { AgentAsk, AgentChecklist, AgentDraft, PlanStep } from "@/lib/agent";
 import type { Verification } from "@/lib/verify";
 import { downloadFile, downloadName, fileMeta, parseBlocks, type GeneratedFile } from "@/lib/fileExport";
+import type { EligibilitySummary } from "@/lib/eligibility";
+import { similarName } from "@/lib/officialFacts";
 import { AgentOverlay, AgentPlanCard, type AgentPlanStep, type AgentTarget } from "@/components/AgentOverlay";
 import {
   InfoOnboarding,
@@ -49,15 +51,8 @@ type View = "answer" | "combo" | "recipe" | "audit";
 const PANEL_VIEWS: View[] = ["answer", "combo", "recipe", "audit"];
 // 예전 대화에 저장된 탭: 신청 패키지는 제출로, 실행 내역·자격 판정은 받을 돈으로 연다
 const toView = (v: string): View => (v === "package" ? "audit" : PANEL_VIEWS.includes(v as View) ? (v as View) : "combo");
-type Verdict = "eligible" | "needs_parent_check" | "ineligible";
-
-interface Summary {
-  medianRatioPercent: number;
-  totalConvertedRentKRW: number;
-  convertedDepositKRW: number;
-  verdict: Verdict;
-  independent: boolean;
-}
+type Verdict = EligibilitySummary["verdict"];
+type Summary = EligibilitySummary;
 
 interface Profile {
   age: number;
@@ -220,11 +215,6 @@ const SOURCE: Record<ToolSource, { label: string; cls: string; hint: string }> =
     cls: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
     hint: "입력값으로 실제 계산한 결과",
   },
-  sample: {
-    label: "예시 데이터",
-    cls: "bg-amber-50 text-amber-800 ring-amber-600/25",
-    hint: "시연용으로 준비한 데이터",
-  },
   live: {
     label: "실시간 API",
     cls: "bg-brand-50 text-brand-700 ring-brand-600/20",
@@ -234,23 +224,27 @@ const SOURCE: Record<ToolSource, { label: string; cls: string; hint: string }> =
 
 const VERDICT: Record<Verdict, { title: string; body: string; cls: string }> = {
   eligible: {
-    title: "신청 대상에 해당합니다",
-    body: "독립가구 특례가 적용되어 부모님(원가구) 소득은 심사하지 않습니다.",
+    title: "확인한 조건을 모두 충족합니다",
+    body: "최종 판정은 접수 기관이 합니다. 신청 전 공고 원문을 확인하세요.",
     cls: "border-emerald-200 bg-emerald-50 text-emerald-900",
   },
-  needs_parent_check: {
-    title: "부모님 소득 확인이 추가로 필요합니다",
-    body: "본인 소득과 월세 요건은 충족하지만 독립가구 특례에 해당하지 않습니다.",
+  needs_check: {
+    title: "확인이 더 필요합니다",
+    body: "아래에서 정보가 없거나 직접 확인해야 하는 조건을 살펴보세요.",
     cls: "border-amber-200 bg-amber-50 text-amber-900",
   },
   ineligible: {
-    title: "충족하지 못한 요건이 있습니다",
-    body: "본인 소득(중위 60% 이하) 또는 월세 상한 요건을 확인하세요.",
+    title: "충족하지 못한 조건이 있습니다",
+    body: "아래 미충족 조건을 확인하세요.",
     cls: "border-red-200 bg-red-50 text-red-900",
   },
 };
 
-const won = (n: number) => `${Math.round(n).toLocaleString("ko-KR")}원`;
+const CHECK_STATUS: Record<EligibilitySummary["checks"][number]["status"], { label: string; cls: string }> = {
+  pass: { label: "충족", cls: "bg-emerald-50 text-emerald-700" },
+  fail: { label: "미충족", cls: "bg-red-50 text-red-700" },
+  unknown: { label: "정보 없음", cls: "bg-slate-100 text-slate-600" },
+};
 const now = () =>
   new Date().toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit" });
 const risksOf = (a: { findings: { severity: string }[] }) =>
@@ -361,7 +355,7 @@ export default function Page() {
   const [focusId, setFocusId] = useState<string | null>(null);
   // AI가 되물은 정보의 상태: waiting(답 대기) → resolved(답 반영 후 재판정)
   const [askState, setAskState] = useState<{ status: "waiting" | "resolved"; question: string; reason?: string; answer?: string } | null>(null);
-  // 패널 탭들의 기준 정책: "메시지id#정책순번" 또는 시연 시 "demo"
+  // 패널 탭들의 기준 정책: "메시지id#정책순번"
   const [ctx, setCtx] = useState("");
   // 정책별 자격 응답·서류 준비·검수 결과 (브라우저에 저장)
   const [policyState, setPolicyState] = useState<Record<string, PolicyState>>({});
@@ -570,7 +564,7 @@ export default function Page() {
 
   // 실시간 공고: 내 정보가 채워지거나 조건이 바뀌면 온통청년·복지로·보조금24에서 조회한다 (서버 10분 캐시)
   const liveKey = [
-    extra.sido, extra.sigungu, extra.interests, profile.age, extra.job, extra.marriage, extra.children, extra.education, extra.special, extra.company,
+    extra.sido, extra.sigungu, extra.interests, profile.age, extra.job, extra.housing, extra.marriage, extra.children, extra.education, extra.special, extra.company,
   ].join("|");
   useEffect(() => {
     if (!loaded || welcome) return;
@@ -597,6 +591,7 @@ export default function Page() {
             // 온통청년은 나이·취업상태·혼인·학력·우대 조건 코드로 거른다
             age: profile.age === "" ? undefined : profile.age,
             job: extra.job,
+            housing: extra.housing,
             marriage: extra.marriage,
             children: extra.children,
             education: extra.education,
@@ -951,7 +946,7 @@ export default function Page() {
       isAudit
         ? [
             { label: "첨부 서류 전처리", status: "active" },
-            { label: "서류 판독 · 규칙 점검", status: "pending" },
+            { label: "서류 판독 · 점검", status: "pending" },
             { label: "교차 검증 리포트", status: "pending" },
           ]
         : [
@@ -991,24 +986,17 @@ export default function Page() {
         }
         setView("audit");
         setCanvasOpen(true);
-        const engine = data.mode === "gemini" ? "AI 판독" : "규칙 엔진";
-        const skippedList = Array.isArray(data.skippedFiles) ? data.skippedFiles : [];
-        const skipped = skippedList.length
-          ? `\n\n검수하지 못한 파일: ${skippedList.join(", ")} (이미지·PDF는 AI API 키 필요)`
-          : "";
         patch(id, {
-          content:
-            (n
-              ? `첨부하신 서류 ${result.documents.length}건에서 **반려 위험 ${n}건**을 찾았습니다.\n\n${result.findings
-                  .filter((f) => f.severity !== "pass")
-                  .map((f, i) => `${i + 1}. ${f.title}`)
-                  .join("\n")}`
-              : `첨부하신 서류 ${result.documents.length}건에서 **점검 기준에 걸리는 항목을 찾지 못했습니다.**`) +
-            `\n\n검수 방식: ${engine}${data.note ? ` · ${data.note}` : ""}${skipped}`,
+          content: n
+            ? `첨부하신 서류 ${result.documents.length}건에서 **반려 위험 ${n}건**을 찾았습니다.\n\n${result.findings
+                .filter((f) => f.severity !== "pass")
+                .map((f, i) => `${i + 1}. ${f.title}`)
+                .join("\n")}`
+            : `첨부하신 서류 ${result.documents.length}건에서 **점검 기준에 걸리는 항목을 찾지 못했습니다.**`,
           artifact: {
             view: "audit",
             title: auditFor ? `${auditFor.p.name} 서류 검수` : "업로드 서류 검수 리포트",
-            meta: `${engine} · 반려 위험 ${n}건`,
+            meta: `AI 판독 · 반려 위험 ${n}건`,
           },
         });
         finishAgentWithTarget(
@@ -1041,7 +1029,7 @@ export default function Page() {
             .slice(-8)
             .map(({ role, content }) => ({ role, content })),
           sites: myTools.map(({ name, url }) => ({ name, url })),
-          // 입력하지 않은 항목은 보내지 않는다 (서버가 시연 기본값을 쓴다). 0은 0으로 보낸다.
+          // 입력하지 않은 항목은 보내지 않는다. 0은 0으로 보낸다.
           userProfile:
             hasProfileInput(prof) || Object.values(extra).some(Boolean)
               ? {
@@ -1148,12 +1136,12 @@ export default function Page() {
         verification: (data.verification as Verification | undefined) || undefined,
         plan: (data.plan as PlanStep[] | undefined) || undefined,
         ...(eligibility && {
-          artifact: { view: "combo" as View, title: "자격 판정 결과", meta: "입력 조건 기준 계산" },
+          artifact: { view: "combo" as View, title: "자격 확인 결과", meta: "공고 조건과 내 정보 대조" },
         }),
       });
       if (eligibility && window.innerWidth >= 1024) {
-        finishAgentWithTarget("자격 판정 결과를 정리했습니다.", [
-          { tab: "combo", selector: "triage-calc", label: "소득·월세 계산 결과" },
+        finishAgentWithTarget("자격 확인 결과를 정리했습니다.", [
+          { tab: "combo", selector: "triage-calc", label: "자격 확인 결과" },
         ]);
       } else if (cardData && window.innerWidth >= 1024) {
         const hasPolicies = Boolean(cardData.policies && cardData.policies.length > 0);
@@ -1463,7 +1451,7 @@ export default function Page() {
                     <p className="text-xs font-medium text-slate-800 truncate leading-tight">연결 및 개인정보 설정</p>
                     <p className="text-[11px] text-slate-400 truncate leading-tight mt-0.5 flex items-center gap-1.5">
                       <span className={`inline-block h-1.5 w-1.5 rounded-full ${apiConnected ? "bg-emerald-500" : "bg-slate-400"}`} />
-                      {apiConnected ? "AI 연결됨" : "기본 규칙 검수 모드"}
+                      {apiConnected ? "AI 연결됨" : "AI 연결 안 됨"}
                     </p>
                   </div>
                 </div>
@@ -1544,7 +1532,7 @@ export default function Page() {
           >
             <div className="px-6 md:px-8 max-w-3xl mx-auto w-full min-h-full flex flex-col items-center pt-12 pb-6">
               {messages.length === 0 ? (
-                // 첫 화면: 한 줄 소개 → 시연 단계 (입력창은 맨 아래 고정)
+                // 첫 화면: 한 줄 소개 → 주요 기능 (입력창은 맨 아래 고정)
                 <div className="flex w-full flex-1 flex-col items-center justify-center">
                   <div className="mb-6 flex flex-col items-center text-center">
                     <h1 className="animate-fade-up delay-2 text-2xl font-bold tracking-tight text-slate-900">
@@ -1922,28 +1910,41 @@ export default function Page() {
                 />
               </>
             )}
-            {view === "combo" && !active && summary && (
+            {view === "combo" && summary && (!active || similarName(active.p.name, summary.policyName)) && (
               <Card target="triage-calc">
-                <CardHead
-                  title="청년월세 자격 계산 결과"
-                  desc="입력값 기반 실계산 · 최종 판정은 접수 기관이 합니다"
-                  action={<SourceBadge source="calc" />}
-                />
+                <CardHead title={`${summary.policyName} 자격 확인`} desc={summary.basis} action={<SourceBadge source="calc" />} />
                 <div className="space-y-3 p-4">
                   <div className={`rounded-xl border px-3.5 py-2.5 text-[13px] ${VERDICT[summary.verdict].cls}`}>
                     <div className="font-semibold">{VERDICT[summary.verdict].title}</div>
                     <div className="mt-0.5 text-xs opacity-90">{VERDICT[summary.verdict].body}</div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 text-[13px]">
-                    <div className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2">
-                      <div className="text-xs text-slate-500">1인가구 중위소득 대비</div>
-                      <div className="tnum mt-0.5 font-semibold text-slate-900">{summary.medianRatioPercent}%</div>
+                  {summary.checks.length > 0 && (
+                    <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100">
+                      {summary.checks.map((c) => (
+                        <li key={c.label} className="flex items-start justify-between gap-3 px-3 py-2 text-[13px]">
+                          <div className="min-w-0">
+                            <div className="font-medium text-slate-800">{c.label}</div>
+                            <div className="mt-0.5 text-xs text-slate-500">
+                              내 정보 {c.mine} · {c.basis}
+                            </div>
+                          </div>
+                          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${CHECK_STATUS[c.status].cls}`}>
+                            {CHECK_STATUS[c.status].label}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {summary.others.length > 0 && (
+                    <div className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
+                      <div className="font-medium text-slate-700">직접 확인할 조건</div>
+                      <ul className="mt-1 space-y-0.5">
+                        {summary.others.map((o) => (
+                          <li key={o}>• {o}</li>
+                        ))}
+                      </ul>
                     </div>
-                    <div className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2">
-                      <div className="text-xs text-slate-500">환산 합산 월세</div>
-                      <div className="tnum mt-0.5 font-semibold text-slate-900">{won(summary.totalConvertedRentKRW)}</div>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </Card>
             )}
@@ -1991,7 +1992,7 @@ export default function Page() {
                 <div className="space-y-2 px-4 pb-4 text-xs leading-relaxed text-slate-500">
                   <p>채팅 입력창의 클립 버튼으로 공고문을 먼저 올리거나 정책을 고르면 그 공고 기준으로 검수합니다.</p>
                   <p className="rounded-lg bg-amber-50/70 px-3 py-2 text-amber-900">
-                    실제 개인정보가 포함된 신분증·계약서 대신 가상·샘플 서류(예: <code className="font-mono">public/sample-docs</code>)를 사용해 주세요. 텍스트(.txt)는 주민번호·연락처·계좌를 가린 뒤 전송합니다.
+                    이미지·PDF는 판독을 위해 원본이 AI 서버로 전송됩니다. 주민번호 뒷자리 등 민감한 정보는 가린 뒤 올려 주세요. 텍스트(.txt)는 주민번호·연락처·계좌를 가린 뒤 전송합니다.
                   </p>
                 </div>
               </Card>
@@ -2006,9 +2007,6 @@ export default function Page() {
                     서류 다시 올리기
                     <input type="file" multiple accept=".pdf,image/*,.txt" onChange={uploadForPolicy} disabled={working} className="sr-only" />
                   </label>
-                  <span className="text-xs text-slate-500">
-                    검수 방식: {upload.mode === "gemini" ? "AI 판독" : "규칙 엔진"}
-                  </span>
                 </div>
 
                 <AuditReport audit={uploadAudit} display={display} />
@@ -2788,6 +2786,8 @@ function IconButton({
 }
 
 function SourceBadge({ source }: { source: ToolSource }) {
+  // 예전 대화에 저장된, 지금은 없는 출처 종류는 표시하지 않는다
+  if (!SOURCE[source]) return null;
   return (
     <span
       title={SOURCE[source].hint}
@@ -3053,7 +3053,7 @@ function AnswerPanel({
       <Card>
         <CardHead
           title={`도구 실행 ${traces.length}건`}
-          desc={`실계산 ${traces.filter((t) => t.source === "calc").length} · 예시 데이터 ${traces.filter((t) => t.source === "sample").length} · 실시간 ${traces.filter((t) => t.source === "live").length}`}
+          desc={`실계산 ${traces.filter((t) => t.source === "calc").length} · 실시간 ${traces.filter((t) => t.source === "live").length}`}
         />
         {traces.length ? <ToolList tools={traces} /> : <Empty text="이 답변은 별도 도구 없이 만들어졌습니다." />}
       </Card>

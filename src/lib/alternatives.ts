@@ -1,7 +1,8 @@
 // 대안 찾기: 원하는 지원이 안 될 때 같은 목적을 이룰 다른 지원을 실제 공고에서 찾는다.
 // 온통청년·복지로·보조금24를 키워드로 검색하고, 각 출처의 규칙으로 내 조건에 맞지 않는 것을 거른다.
 // 화면의 공고명·링크·기한은 AI가 쓴 값이 아니라 여기서 찾은 원본으로 채운다 (지어내기 방지).
-import { SIDO_FULL, officialGov24, recommendGov24, searchGov24, type Gov24Notice } from "./gov24";
+import { isOtherSidoOrg } from "@/data/regions";
+import { officialGov24, recommendGov24, searchGov24, type Gov24Notice } from "./gov24";
 import { officialYouth, recommendYouth, searchYouth, type YouthQuery } from "./youthcenter";
 import { recommendWelfare, searchWelfare } from "./welfare";
 import { normName, similarName, type OfficialRecord } from "./officialFacts";
@@ -18,13 +19,6 @@ const labelOf = (c: Gov24Notice) => SOURCE_LABEL[c.source || "gov24"];
 const similar = similarName;
 
 const noKey = () => Promise.reject<Gov24Notice[]>(new Error("no key"));
-
-// 다른 시도 기관이 운영하는 사업인지 (온통청년은 지역 코드가 넓게 잡힌 타 지역 사업이 섞여 온다)
-const isOtherSidoOrg = (org: string, sido?: string) => {
-  if (!sido) return false;
-  if ((SIDO_FULL[sido] || []).some((name) => org.startsWith(name))) return false;
-  return Object.values(SIDO_FULL).some((names) => names.some((name) => org.startsWith(name)));
-};
 
 export async function findAlternatives(
   keys: { pk?: string; yk?: string },

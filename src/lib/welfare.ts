@@ -5,6 +5,7 @@
 //   lifeNmArray·trgterIndvdlNmArray·intrsThemaNmArray·sprtCycNm·srvPvsnNm·servDtlLink.
 // 키는 공공데이터포털 일반 인증키(PUBLIC_DATA_API_KEY)를 같이 쓴다.
 import type { Gov24Notice } from "./gov24";
+import { relevanceScore } from "./relevance";
 
 const ENDPOINT = "https://apis.data.go.kr/B554287/LocalGovernmentWelfareInformations/LcgvWelfarelist";
 
@@ -75,6 +76,8 @@ export interface WelfareQuery {
   interests?: string[];
   marriage?: string;
   children?: string;
+  job?: string;
+  housing?: string;
 }
 
 const cache = new Map<string, { at: number; data: Gov24Notice[] }>();
@@ -100,6 +103,8 @@ const toNotice = (x: Item): Gov24Notice => ({
   docs: [],
   applyAt: (x.aplyMtdNm || "").slice(0, 40),
   url: /^https:\/\//.test(x.servDtlLink || "") ? x.servDtlLink : "https://www.bokjiro.go.kr",
+  // '서민금융'은 금융과 상관없는 서비스에도 붙어 있어 분야 판단에서 뺀다
+  topics: (x.intrsThemaNmArray || "").replace(/서민금융/g, "").slice(0, 60),
 });
 
 // 대안 찾기: 서비스명·내용을 키워드로 검색한다 (시도 공통 사업과 내 시군구 사업만)
@@ -167,11 +172,14 @@ export async function recommendWelfare(
       if (x.sggNm && x.sggNm === q.sigungu) score += 3; // 내 시군구 사업
       if (/^청년$|청년/.test(x.lifeNmArray || "") && !/중장년|노년/.test(x.lifeNmArray || "")) score += 1; // 청년 전용에 가까움
       if ((q.interests || []).some((i) => THEME[i]?.test(x.intrsThemaNmArray || ""))) score += 2;
-      return { x, score };
+      const notice = toNotice(x);
+      const related = relevanceScore(notice, q);
+      return { notice, related, score: score + related * 2 };
     })
+    .filter((x) => x.related >= 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, 6)
-    .map(({ x }) => toNotice(x));
+    .map((x) => x.notice);
   cache.set(cacheKey, { at: Date.now(), data });
   return data;
 }

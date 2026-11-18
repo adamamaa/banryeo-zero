@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronUp, Plus, X } from "lucide-react";
 import { SIDO, SIGUNGU } from "@/data/regions";
 
-// 채팅 전에 받는 내 정보. 숫자 항목은 자격 계산(중위소득·환산 월세·독립 특례)에 그대로 쓰이고,
+// 채팅 전에 받는 내 정보. 숫자 항목은 공고별 자격 조건과 비교하는 데 쓰이고,
 // 지역·하는 일은 AI 답변을 내 상황에 맞추는 데 쓰인다.
 export type InfoKey =
   // 기본 정보 (자격 계산에 직접 쓰임)
@@ -69,7 +69,7 @@ export const INFO_QUESTIONS: Question[] = [
     key: "age",
     label: "나이",
     question: "만 나이가 어떻게 되세요?",
-    why: "청년 정책은 대부분 만 19~34세가 대상이고, 만 30세부터는 독립가구 특례가 적용됩니다.",
+    why: "공고마다 정한 나이 조건과 비교합니다.",
     options: [20, 23, 26, 29, 32].map((n) => ({ label: `만 ${n}세`, value: n })),
     unit: "세",
     max: 99,
@@ -87,7 +87,7 @@ export const INFO_QUESTIONS: Question[] = [
     key: "incomeManwon",
     label: "월 소득",
     question: "한 달 소득은 얼마쯤인가요?",
-    why: "기준 중위소득 대비 비율(60% 이하인지)을 계산합니다. 세전 기준으로 골라 주세요.",
+    why: "공고의 소득 조건과 비교합니다. 세전 기준으로 골라 주세요.",
     options: [{ label: "소득 없음", value: 0 }, ...[100, 130, 160, 200].map((n) => ({ label: `${n}만 원`, value: n }))],
     unit: "만 원",
     max: 10000,
@@ -97,7 +97,7 @@ export const INFO_QUESTIONS: Question[] = [
     key: "sepMonths",
     label: "독립 기간",
     question: "부모님과 따로 산 지 얼마나 됐나요?",
-    why: "1년 넘게 따로 살았으면 부모님 소득을 빼고 심사받을 수 있습니다.",
+    why: "부모님과 따로 산 기간을 보는 공고와 비교합니다.",
     options: [
       { label: "함께 살아요", value: 0 },
       { label: "1년 미만", value: 6 },
@@ -121,7 +121,7 @@ export const INFO_QUESTIONS: Question[] = [
     key: "depositManwon",
     label: "보증금",
     question: (v) => (v.housing === "전세" ? "전세보증금은 얼마인가요?" : "지금 사는 집 보증금은 얼마인가요?"),
-    why: "보증금 상한(월세 지원 5천만 원, 전세 지원은 사업마다 다름)과 월세 환산액을 확인합니다.",
+    why: "공고마다 다른 보증금 조건과 비교합니다.",
     options: (v) =>
       v.housing === "전세"
         ? [3000, 5000, 10000, 20000, 30000].map((n) => ({ label: `${man(n)} 원`, value: n }))
@@ -135,7 +135,7 @@ export const INFO_QUESTIONS: Question[] = [
     key: "rentManwon",
     label: "월세",
     question: "월세는 얼마인가요?",
-    why: "청년월세 지원의 월세 요건(70만 원 이하)을 확인합니다.",
+    why: "공고마다 다른 월세 조건과 비교합니다.",
     options: [40, 50, 60, 70, 80].map((n) => ({ label: `${n}만 원`, value: n })),
     unit: "만 원",
     max: 1000,
@@ -234,7 +234,7 @@ export const INFO_QUESTIONS: Question[] = [
     group: "extra",
     label: "부모님 소득",
     question: "부모님(원가구) 소득은 어느 정도인가요?",
-    why: "독립 특례에 해당하지 않으면 부모님 소득까지 함께 보는 공고가 많아요.",
+    why: "부모님 소득까지 함께 보는 공고가 있어요.",
     options: opts(["중위 100% 이하", "중위 100% 초과", "잘 모름"]),
     tag: (v) => `부모님 소득 ${v}`,
   },
@@ -243,7 +243,7 @@ export const INFO_QUESTIONS: Question[] = [
     group: "extra",
     label: "본인 재산",
     question: "본인 재산(예금·전세금·차량 등 합계)은 어느 정도인가요?",
-    why: "청년월세는 1.22억, 행복주택은 약 2.5억처럼 재산 상한이 있는 공고가 많아요.",
+    why: "재산 상한이 있는 공고가 많아요.",
     options: opts(["5천만 원 이하", "1억 원 이하", "2억 원 이하", "2억 원 초과"]),
     tag: (v) => `재산 ${v}`,
   },

@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { downloadIcs } from "@/lib/ics";
+import { deadlineKind } from "@/lib/deadline";
 import { guessValidDays, type Gov24Notice } from "@/lib/gov24";
 
 // 실시간 공고 조회 상태 (온통청년 · 복지로 · 보조금24)
@@ -249,7 +250,7 @@ export function SidebarRecs({
   const period = (n: Gov24Notice) => {
     const end = parse(n.applyEnd);
     const start = parse(n.applyStart);
-    return end ? `${start ? md(start) : ""} ~ ${md(end)}` : "상시 신청";
+    return end ? `${start ? md(start) : ""} ~ ${md(end)}` : "신청 기간은 공고문 확인";
   };
 
   return (
@@ -331,7 +332,7 @@ export function SidebarRecs({
               const end = parse(n.applyEnd);
               const notStarted = Boolean(start && start > today);
               const docs = n.docs.map((d) => ({ name: d, validDays: guessValidDays(d) }));
-              const always = /상시/.test(n.deadlineText) || !n.deadlineText;
+              const always = deadlineKind(n) === "always";
               return (
                 <div key={id} className={`rounded-lg ${open ? "bg-white ring-1 ring-slate-200" : "hover:bg-slate-100"}`}>
                   <button
@@ -356,9 +357,7 @@ export function SidebarRecs({
                     ) : always ? (
                       <span className="shrink-0 rounded bg-slate-100 px-1 py-px text-[10px] text-slate-500">상시</span>
                     ) : (
-                      <span className="shrink-0 rounded bg-purple-50 px-1 py-px text-[10px] text-purple-700">
-                        {sourceLabel(n)}
-                      </span>
+                      <span className="shrink-0 rounded bg-slate-100 px-1 py-px text-[10px] text-slate-500">기간 확인</span>
                     )}
                     {on ? (
                       <BellRing className="h-3 w-3 shrink-0 text-purple-600" aria-label="알림 켜짐" />

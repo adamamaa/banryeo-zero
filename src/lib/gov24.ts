@@ -2,7 +2,10 @@
 // 목록(serviceList)으로 내 지역·관심 분야 공고를 찾고, 상세(serviceDetail)에서 신청기한·구비서류를 가져온다.
 // 키는 서버 환경변수 PUBLIC_DATA_API_KEY (공공데이터포털 일반 인증키)를 쓴다. 키가 없으면 조회하지 않는다.
 
+import { SIDO_FULL } from "@/data/regions";
+import { PERIOD_UNKNOWN, localYmd, parseApplyPeriod, trustedPeriod } from "./deadline";
 import { ymdOf, type OfficialRecord } from "./officialFacts";
+import { relevanceScore, wantedTopics, type RelevanceProfile } from "./relevance";
 
 const BASE = "https://api.odcloud.kr/api/gov24/v3";
 
@@ -20,6 +23,8 @@ export interface Gov24Notice {
   docs: string[];
   applyAt: string;
   url: string;
+  // 공고 분야 (관련 공고를 고를 때 쓴다)
+  topics?: string;
 }
 
 type Row = Record<string, unknown>;
@@ -38,36 +43,7 @@ async function call(path: string, key: string, params: Record<string, string>): 
   return Array.isArray(data?.data) ? data.data : [];
 }
 
-const pad = (n: number) => String(n).padStart(2, "0");
-const ymd = (y: number, m: number, d: number) =>
-  m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}-${pad(m)}-${pad(d)}` : undefined;
-const todayYmd = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
-
-// "2026. 12. 1.(월) ~ 12. 19.(금)", "2026.3.30.~2026.5.29.", "2026-12-31까지", "상시신청" 등을 날짜로 바꾼다
-export function parseApplyPeriod(text: string): { start?: string; end?: string } {
-  const t = text.replace(/\s+/g, " ");
-  const full = Array.from(t.matchAll(/(20\d{2})\s*[.\-년/]\s*(\d{1,2})\s*[.\-월/]\s*(\d{1,2})/g));
-  if (!full.length) return {};
-  const [d0] = full;
-  const y0 = Number(d0[1]);
-  const start = ymd(y0, Number(d0[2]), Number(d0[3]));
-  if (!start) return {};
-  if (full.length >= 2) {
-    const end = ymd(Number(full[1][1]), Number(full[1][2]), Number(full[1][3]));
-    return end ? { start, end } : { start };
-  }
-  const after = t.slice((d0.index ?? 0) + d0[0].length);
-  const short = after.match(/^[^~]{0,12}~\s*(\d{1,2})\s*[.\-월/]\s*(\d{1,2})/);
-  if (short) {
-    const end = ymd(y0, Number(short[1]), Number(short[2]));
-    return end ? { start, end } : { start };
-  }
-  if (/^.{0,8}(까지|마감)/.test(after)) return { end: start };
-  return { start };
-}
+const todayYmd = () => localYmd();
 
 // 구비서류 글을 서류 이름 목록으로 나눈다 ("○ 주민등록등본 1부", "1. 신청서" 등)
 export function splitDocs(text: string): string[] {
@@ -95,8 +71,13 @@ export function guessValidDays(doc: string): number | null {
 }
 
 const toNotice = (r: Row, detail?: Row): Gov24Notice => {
-  const deadlineText = s(detail?.["신청기한"] ?? r["신청기한"], 120);
-  const { start, end } = parseApplyPeriod(deadlineText);
+  const rawDeadline = s(detail?.["신청기한"] ?? r["신청기한"], 120);
+  const period = trustedPeriod(parseApplyPeriod(rawDeadline));
+  // 지난 회차만 날짜로 적혀 있고 다음 회차가 예고된 경우는 마감으로 보지 않는다
+  const nextRound = Boolean(period.end && period.end < todayYmd() && /예정|하반기|추가\s*모집|수시/.test(rawDeadline));
+  const deadlineText = period.uncertain ? PERIOD_UNKNOWN : rawDeadline;
+  const start = nextRound ? undefined : period.start;
+  const end = nextRound ? undefined : period.end;
   return {
     source: "gov24",
     id: s(r["서비스ID"], 40),
@@ -110,6 +91,7 @@ const toNotice = (r: Row, detail?: Row): Gov24Notice => {
     docs: splitDocs(s(detail?.["구비서류"], 800)),
     applyAt: s(detail?.["접수기관명"] ?? r["접수기관"], 40),
     url: https(detail?.["온라인신청사이트URL"]) || https(r["상세조회URL"]) || "https://www.gov.kr/portal/rcvfvrSvc/main",
+    topics: s(r["서비스분야"], 40),
   };
 };
 
@@ -125,27 +107,7 @@ const INTEREST_KEYWORD: Record<string, string> = {
   "건강·심리": "심리",
 };
 
-export const SIDO_FULL: Record<string, string[]> = {
-  서울: ["서울특별시"],
-  부산: ["부산광역시"],
-  대구: ["대구광역시"],
-  인천: ["인천광역시"],
-  광주: ["광주광역시", "전남광주통합특별시"],
-  대전: ["대전광역시"],
-  울산: ["울산광역시"],
-  세종: ["세종특별자치시"],
-  경기: ["경기도"],
-  강원: ["강원특별자치도", "강원도"],
-  충북: ["충청북도"],
-  충남: ["충청남도"],
-  전북: ["전북특별자치도", "전라북도"],
-  전남: ["전라남도", "전남광주통합특별시"],
-  경북: ["경상북도"],
-  경남: ["경상남도"],
-  제주: ["제주특별자치도"],
-};
-
-// 같은 조건은 10분 동안 다시 부르지 않는다 (호출 한도 아끼기)
+export // 같은 조건은 10분 동안 다시 부르지 않는다 (호출 한도 아끼기)
 const cache = new Map<string, { at: number; data: Gov24Notice[] }>();
 
 // 소관기관으로 내 지역 사업인지 가른다
@@ -183,7 +145,7 @@ export async function officialGov24(key: string, name: string): Promise<Omit<Off
     org: s(r["소관기관명"], 40),
     updated: ymdOf(s(r["수정일시"], 20)),
     benefit: s(r["지원내용"], 700),
-    target: s(r["지원대상"], 300),
+    target: [s(r["지원대상"], 500), s(r["선정기준"], 500)].filter(Boolean).join(" "),
     deadline: s(r["신청기한"], 80),
     url: https(r["상세조회URL"]),
   }));
@@ -224,7 +186,7 @@ export async function searchGov24(
 
 export async function recommendGov24(
   key: string,
-  q: { sido?: string; sigungu?: string; interests?: string[] },
+  q: RelevanceProfile,
   opts?: { bypassCache?: boolean }
 ): Promise<Gov24Notice[]> {
   const cacheKey = JSON.stringify(q);
@@ -234,9 +196,10 @@ export async function recommendGov24(
   // serviceList는 서비스명·서비스ID·등록/수정일시로만 거를 수 있다 (Swagger 기준).
   // 그래서 '청년'이 들어간 서비스를 넉넉히 받아 소관기관명으로 지역을 거르고, 관심 분야는 서비스명으로 따로 찾는다.
   const youthRows = await call("serviceList", key, { perPage: "500", "cond[서비스명::LIKE]": "청년" });
+  const { picked, situation } = wantedTopics(q);
   const interestRows = (
     await Promise.all(
-      (q.interests || [])
+      Array.from(new Set([...picked, ...situation]))
         .slice(0, 3)
         .map((i) => INTEREST_KEYWORD[i])
         .filter(Boolean)
@@ -264,7 +227,12 @@ export async function recommendGov24(
       seen.add(id);
       return true;
     })
-    .slice(0, 8);
+    // 지역 순서는 유지하고, 내 상황과 관련 있는 공고만 남긴다
+    .map((r) => ({ r, score: relevanceScore(toNotice(r), q) }))
+    .filter((x) => x.score >= 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10)
+    .map((x) => x.r);
 
   // 상세(신청기한·구비서류)는 앞의 6개만
   const details = await Promise.all(
@@ -277,7 +245,7 @@ export async function recommendGov24(
   const today = todayYmd();
   const data = rows
     .map((r, i) => toNotice(r, details[i]))
-    .filter((n) => n.id && n.name && (!n.applyEnd || n.applyEnd >= today));
+    .filter((n) => n.id && n.name && (!n.applyEnd || n.applyEnd >= today) && relevanceScore(n, q) >= 0);
   cache.set(cacheKey, { at: Date.now(), data });
   return data;
 }

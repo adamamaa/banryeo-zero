@@ -2,7 +2,7 @@
 // AI(Gemini)가 질문을 보고 어떤 도구를 쓸지 스스로 고르고, 서버가 실행한 결과를 다시 AI에 돌려준다.
 // 검색(google_search)은 Gemini 서버에서 실행되고, 나머지 도구는 이 파일에서 실행한다.
 import { callGemini, geminiError, groundSources, maskPii, type WebSource } from "./gemini";
-import { judgeEligibility, MEDIAN_INCOME_2026, estimateNhisFee, medianRatioPercent } from "./standards";
+import { judgeConditions, type ConditionField, type EligibilitySummary, type MyValues, type PolicyCondition } from "./eligibility";
 import { fetchGov24Services, type ToolExecution } from "./tools";
 import type { AuditResult } from "./docRules";
 import { parseCard, type PolicyDetail } from "./card";
@@ -10,14 +10,6 @@ import { verifyAnswer, type Verification } from "./verify";
 import { findAlternatives, lookupOfficial, searchNotices, type AltCandidate, type AltProfile } from "./alternatives";
 import { cleanPolicyName, pickOfficial, policyNamesIn, type OfficialRecord } from "./officialFacts";
 import { FILE_FORMATS, downloadName, fileMeta, normalizeFile, type GeneratedFile } from "./fileExport";
-
-export interface EligibilitySummary {
-  medianRatioPercent: number;
-  totalConvertedRentKRW: number;
-  convertedDepositKRW: number;
-  verdict: "eligible" | "needs_parent_check" | "ineligible";
-  independent: boolean;
-}
 
 // 실행 단계 산출물: 제출용 초안과 제출 직전 체크리스트
 export interface AgentDraft {
@@ -62,6 +54,8 @@ export interface AgentInput {
   // 대안 찾기에 쓰는 온통청년 키와 내 정보
   yk?: string;
   profile?: AltProfile;
+  // 자격 확인에 쓰는 내 숫자 정보
+  myValues?: MyValues;
   // 파일 요청을 말로만 넘기지 않았는지 검증할 때 쓰는 원래 질문
   question?: string;
 }
@@ -90,7 +84,7 @@ const MAX_TURNS = 9;
 
 const PLAN_TOOLS = [
   "google_search",
-  "calculate_eligibility",
+  "check_eligibility",
   "lookup_subsidy_list",
   "check_policy",
   "search_policies",
@@ -131,24 +125,52 @@ const DECLARATIONS = [
     },
   },
   {
-    name: "calculate_eligibility",
+    name: "check_eligibility",
     description:
-      "청년월세 지원(시연 공고 기준) 자격을 실제로 계산한다: 1인 가구 기준 중위소득 대비 본인 소득 비율, 보증금 월세 환산 합산액, 독립가구 특례. 월세·소득·자격 판정 질문이면 반드시 호출한다. 값은 [사용자 정보]나 대화에서 확인된 것만 넣고, 모르는 값은 추측하지 말고 ask_user로 묻는다.",
+      "특정 정책의 실제 자격 조건과 사용자 정보를 서버가 대조한다. 먼저 check_policy, google_search, 첨부 공고문 중 하나로 그 정책의 조건을 확인한 뒤 호출한다. 확인한 공고에 없는 기준을 넣지 않는다. 사용자 값은 서버가 [사용자 정보]에서 가져오며, 대화에서 새로 들은 값만 values에 넣는다.",
     parameters: {
       type: "object",
       properties: {
-        age: { type: "number", description: "만 나이" },
-        monthlyIncomeManwon: { type: "number", description: "본인 월 소득(만 원)" },
-        depositManwon: { type: "number", description: "임차 보증금(만 원)" },
-        monthlyRentManwon: { type: "number", description: "월세(만 원)" },
-        separateLivingMonths: { type: "number", description: "부모님과 따로 산 기간(개월), 함께 살면 0" },
-        parentIncomeManwon: {
-          type: "number",
-          description: "원가구(부모님 가구) 월 소득 합계(만 원). 사용자가 답한 경우에만 넣는다",
+        policyName: { type: "string", description: "정확한 정책 이름" },
+        conditions: {
+          type: "array",
+          description: "숫자로 판정되는 조건",
+          items: {
+            type: "object",
+            properties: {
+              field: {
+                type: "string",
+                enum: ["age", "income", "medianRatio", "sepMonths", "deposit", "rent"],
+                description: "age 만 나이, income 월 소득(만 원), medianRatio 기준 중위소득 대비 %, sepMonths 따로 산 개월, deposit 보증금(만 원), rent 월세(만 원)",
+              },
+              min: { type: "number" },
+              max: { type: "number" },
+              label: { type: "string", description: "공고의 조건 요약 (25자 이내)" },
+              household: { type: "boolean", description: "본인이 아니라 가구 전체 소득을 보는 조건이면 true" },
+            },
+            required: ["field", "label"],
+          },
         },
-        parentHouseholdSize: { type: "number", description: "원가구 가구원 수(본인 포함). 사용자가 답한 경우에만 넣는다" },
+        otherConditions: {
+          type: "array",
+          items: { type: "string" },
+          description: "숫자로 판정할 수 없어 사용자가 확인해야 할 조건 (재산, 무주택, 거주 요건 등)",
+        },
+        values: {
+          type: "object",
+          description: "대화에서 새로 확인한 사용자 값만",
+          properties: {
+            age: { type: "number" },
+            incomeManwon: { type: "number" },
+            depositManwon: { type: "number" },
+            rentManwon: { type: "number" },
+            sepMonths: { type: "number" },
+            householdIncomeManwon: { type: "number", description: "가구 월 소득 합계(만 원)" },
+            householdSize: { type: "number", description: "가구원 수(본인 포함)" },
+          },
+        },
       },
-      required: ["age", "monthlyIncomeManwon", "depositManwon", "monthlyRentManwon", "separateLivingMonths"],
+      required: ["policyName"],
     },
   },
   {
@@ -344,7 +366,8 @@ const DECLARATIONS = [
 const AGENT_RULES = `
 [도구 사용 규칙]
 - 맨 처음에는 반드시 make_plan을 한 번 호출해 2~5단계 계획을 세우고, 그다음 계획 순서대로 도구를 쓰세요. 도중에 계획과 다른 도구가 필요하면 그냥 쓰면 됩니다.
-- 답하기 전에 필요한 도구를 스스로 고르세요: 최신 공고·금액·일정은 google_search, 자격 판정은 calculate_eligibility, 정부 지원사업 목록은 lookup_subsidy_list, 첨부 서류 점검은 audit_documents.
+- 답하기 전에 필요한 도구를 스스로 고르세요: 최신 공고·금액·일정은 google_search, 정책별 자격 판정은 공고 조건을 확인한 뒤 check_eligibility, 정부 지원사업 목록은 lookup_subsidy_list, 첨부 서류 점검은 audit_documents.
+- 자격은 정책마다 다릅니다. 어떤 정책인지 모르면 묻거나 search_policies로 후보를 찾고, 고정된 일반 기준으로 판정하지 마세요. 숫자 조건을 모두 충족해도 나머지 조건이 남으면 "확인이 더 필요"라고 답하세요.
 - 판정에 꼭 필요한 정보가 [사용자 정보]와 대화에 없으면 추측하지 말고 ask_user로 한 가지만 물으세요.
 - 도구 결과에 "추가로필요한정보"가 있으면 최종 답을 내지 말고 바로 ask_user로 그 정보를 물으세요. "확인 필요"를 신청 단계나 주의 문구로 미루지 마세요.
 - 사용자 정보의 값이 0이면 0으로 계산하세요. 값이 아예 없을 때만 묻습니다.
@@ -366,7 +389,6 @@ const AGENT_RULES = `
 - 실제로 할 수 없는 일(대신 신청·제출, 로그인, 메일 발송, 결제, 전화)은 할 수 없다고 짧게 밝히고, 사용자가 바로 쓸 결과물(초안, 체크리스트, 일정 파일)을 만들어 주세요.
 - 도구를 다 쓴 뒤에는 위에서 정한 JSON 형식으로만 최종 답을 출력하세요.`;
 
-const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : Number(v));
 const strs = (v: unknown, max = 8) =>
   (Array.isArray(v) ? v : []).map((x) => String(x).slice(0, 60)).filter(Boolean).slice(0, max);
 
@@ -775,70 +797,77 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
             status: "done",
           });
         }
-      } else if (name === "calculate_eligibility") {
-        step("calculate_eligibility", "자격 요건 계산");
-        show(thought.slice(-140) || "입력 조건으로 중위소득 비율과 환산 월세를 계산합니다.");
-        const age = n(args.age);
-        const income = n(args.monthlyIncomeManwon);
-        const deposit = n(args.depositManwon);
-        const rent = n(args.monthlyRentManwon);
-        const sep = n(args.separateLivingMonths);
-        if ([age, income, deposit, rent, sep].some((v) => !Number.isFinite(v) || v < 0)) {
-          response = { error: "값이 비었거나 잘못됐습니다. 모르는 값은 ask_user로 물어보세요." };
+      } else if (name === "check_eligibility") {
+        const policyName = cleanPolicyName(String(args.policyName || ""));
+        step("check_eligibility", `자격 확인: ${policyName || "정책"}`);
+        show(`${policyName || "정책"}의 공고 조건과 내 정보를 대조하고 있습니다.`);
+        const number = (v: unknown) => {
+          const x = v === "" || v === null || v === undefined ? NaN : Number(v);
+          return Number.isFinite(x) && x >= 0 ? x : undefined;
+        };
+        const FIELDS: ConditionField[] = ["age", "income", "medianRatio", "sepMonths", "deposit", "rent"];
+        const conditions: PolicyCondition[] = (Array.isArray(args.conditions) ? args.conditions : [])
+          .map((c: Record<string, unknown>) => ({
+            field: c?.field as ConditionField,
+            min: number(c?.min),
+            max: number(c?.max),
+            label: String(c?.label || "").slice(0, 40),
+            household: c?.household === true,
+          }))
+          .filter((c: PolicyCondition) => FIELDS.includes(c.field) && c.label && (c.min !== undefined || c.max !== undefined))
+          .slice(0, 8);
+        const said = (args.values || {}) as Record<string, unknown>;
+        const keys: (keyof MyValues)[] = ["age", "incomeManwon", "depositManwon", "rentManwon", "sepMonths", "householdIncomeManwon", "householdSize"];
+        const values: MyValues = { ...input.myValues };
+        for (const k of keys) {
+          const v = number(said[k]);
+          if (v !== undefined) values[k] = v;
+        }
+        if (!policyName) {
+          response = { error: "정책 이름이 없습니다. 어떤 정책인지 확인하세요." };
         } else {
-          const j = judgeEligibility({
-            age,
-            monthlyIncomeKRW: income * 10000,
-            separateLivingMonths: sep,
-            depositKRW: deposit * 10000,
-            rentKRW: rent * 10000,
+          await loadOfficial([policyName]);
+          const judged = judgeConditions({
+            policyName,
+            conditions,
+            others: strs(args.otherConditions, 6),
+            values,
+            records: official.get(policyName) || [],
+            otherEvidence: usedSearch || input.hasDocs,
+            otherEvidenceLabel: input.hasDocs ? "첨부 공고문" : "웹 검색",
           });
-          // 독립가구 특례가 안 되면 원가구(부모님) 소득으로 최종 판정한다 (시연 공고: 원가구 중위 100% 이하)
-          const pIncome = n(args.parentIncomeManwon);
-          const pSize = n(args.parentHouseholdSize);
-          const parentKnown = Number.isFinite(pIncome) && pIncome >= 0 && Number.isFinite(pSize) && pSize >= 1;
-          const parentRatio = parentKnown ? medianRatioPercent(pIncome * 10000, pSize) : null;
-          const verdict =
-            j.verdict === "needs_parent_check" && parentRatio !== null
-              ? parentRatio <= 100
-                ? "eligible"
-                : "ineligible"
-              : j.verdict;
-          const missing =
-            j.verdict === "needs_parent_check" && parentRatio === null
-              ? !Number.isFinite(pSize) || pSize < 1
-                ? "부모님 가구원 수(본인 포함) — 원가구 기준 중위소득을 정하려면 필요. ask_user로 물을 것"
-                : "부모님 가구 월 소득 합계 — 독립가구 특례 미적용이라 원가구 소득으로 최종 판정. ask_user로 물을 것"
-              : null;
-          summary = {
-            medianRatioPercent: j.ratio,
-            totalConvertedRentKRW: j.rent.total,
-            convertedDepositKRW: j.rent.convertedDeposit,
-            verdict,
-            independent: j.independent,
-          };
-          response = {
-            ...(missing && { 추가로필요한정보: missing }),
-            ...(parentRatio !== null && {
-              원가구소득비율: `${parentRatio}% (${pSize}인 가구 기준 중위소득 대비, 요건 100% 이하)`,
-            }),
-            본인소득비율: `${j.ratio}% (1인 가구 기준 중위소득 ${MEDIAN_INCOME_2026[1].toLocaleString("ko-KR")}원 대비, 요건 60% 이하)`,
-            환산합산월세: `${j.rent.total.toLocaleString("ko-KR")}원 (보증금 환산율 연 5.5%, 시연 공고 상한 90만 원)`,
-            월세요건: j.rent.eligible ? "충족" : "초과",
-            독립가구특례: j.independent ? "적용" : "미적용",
-            판정: { eligible: "신청 대상", needs_parent_check: "부모님 소득 확인 필요", ineligible: "요건 미충족" }[verdict],
-            추정건강보험료: `월 ${estimateNhisFee(income * 10000).toLocaleString("ko-KR")}원`,
-            기준: "2026년 기준 중위소득 · 시연용 공고 규칙",
-          };
-          addTrace({
-            toolName: "calculate_eligibility",
-            title: "자격 요건 계산",
-            basis: "2026년 기준 중위소득 · 보증금 환산율 5.5%",
-            source: "calc",
-            input: { 만나이: `${age}세`, 월소득: `${income}만 원`, 보증금: `${deposit}만 원`, 월세: `${rent}만 원`, 별도거주: `${sep}개월` },
-            output: response as Record<string, string>,
-            status: verdict === "eligible" ? "done" : "warn",
-          });
+          const result = judged.summary;
+          if (!result) {
+            response = {
+              error: judged.rejected.length
+                ? `근거가 확인되지 않은 조건입니다: ${judged.rejected.join(", ")}. check_policy나 google_search로 공고 조건을 먼저 확인하세요.`
+                : "대조할 조건이 없습니다. 공고의 자격 조건을 확인해 conditions에 넣으세요.",
+            };
+          } else {
+            summary = result;
+            const verdictLabel = { eligible: "확인한 조건 모두 충족", needs_check: "확인이 더 필요", ineligible: "미충족 조건 있음" }[result.verdict];
+            const statusLabel = { pass: "충족", fail: "미충족", unknown: "정보 없음" };
+            response = {
+              ...(judged.missing.length && { 추가로필요한정보: `${judged.missing.join(", ")} — ask_user로 물을 것` }),
+              ...(judged.rejected.length && { 근거없어제외한조건: judged.rejected }),
+              판정: verdictLabel,
+              조건별: result.checks.map((c) => ({ 조건: c.label, 내값: c.mine, 결과: statusLabel[c.status], 근거: c.basis })),
+              직접확인할조건: result.others,
+              기준: result.basis,
+            };
+            addTrace({
+              toolName: "check_eligibility",
+              title: `자격 확인: ${policyName}`,
+              basis: result.basis,
+              source: "calc",
+              input: { 정책: policyName, 조건: `${result.checks.length}개` },
+              output: {
+                판정: verdictLabel,
+                ...Object.fromEntries(result.checks.map((c, i) => [`${i + 1}. ${c.label}`, `${c.mine} · ${statusLabel[c.status]}`])),
+              },
+              status: result.verdict === "eligible" ? "done" : "warn",
+            });
+          }
         }
       } else if (name === "lookup_subsidy_list") {
         const keyword = String(args.keyword || "청년").slice(0, 20);

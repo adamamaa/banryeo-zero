@@ -69,7 +69,7 @@ interface Amount {
 const AMOUNT = /(?:(\d[\d,]*(?:\.\d+)?)\s*[~∼～\-–]\s*)?(\d[\d,]*(?:\.\d+)?)\s*(만\s*원?|원)/g;
 const toNum = (v: string) => Number(v.replace(/,/g, ""));
 
-function amountsIn(text: string): Amount[] {
+export function amountsIn(text: string): Amount[] {
   return Array.from(text.matchAll(AMOUNT)).map((m) => {
     const unit = m[3].startsWith("만") ? 10000 : 1;
     return {
