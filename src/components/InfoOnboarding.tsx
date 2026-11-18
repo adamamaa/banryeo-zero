@@ -520,6 +520,104 @@ export function InfoOnboarding({
   );
 }
 
+// 추가 조건을 한 화면에서 한꺼번에 고른다 (모두 선택 사항, 해당하는 것만)
+function ExtraConditions({
+  values,
+  onSet,
+  onClose,
+  onDone,
+}: {
+  values: InfoValues;
+  onSet: (key: InfoKey, value: InfoValue) => void;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  // 직업·거주 형태에 맞지 않는 항목은 보여주지 않는다 (예: 직장인에게 창업 기간)
+  const qs = questionsOf("extra").filter((q) => !q.skipIf?.(values));
+  const picked = qs.filter((q) => isFilled(values[q.key])).length;
+
+  const choose = (q: Question, v: string | number) => {
+    if (!q.multi) return onSet(q.key, values[q.key] === v ? "" : v); // 다시 누르면 선택 해제
+    const cur = String(values[q.key] || "").split(",").filter(Boolean);
+    const s = String(v);
+    const next =
+      s === MULTI_NONE
+        ? cur.includes(MULTI_NONE)
+          ? []
+          : [MULTI_NONE]
+        : cur.includes(s)
+        ? cur.filter((x) => x !== s)
+        : [...cur.filter((x) => x !== MULTI_NONE), s];
+    onSet(q.key, next.join(","));
+  };
+
+  return (
+    <div className="w-full">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-purple-600">추가 조건 · 모두 선택 사항</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="닫기"
+          className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <h3 className="mt-3 text-xl font-semibold tracking-tight text-slate-900">해당하는 것만 골라 주세요</h3>
+      <p className="mt-1 text-[13px] text-slate-500">고른 만큼 맞지 않는 공고를 걸러 내고, 우대·가점 조건까지 찾아 드려요.</p>
+
+      <div className="mt-4 max-h-[56vh] space-y-4 overflow-y-auto pr-1">
+        {qs.map((q) => {
+          const options = typeof q.options === "function" ? q.options(values) : q.options;
+          const cur = q.multi ? String(values[q.key] || "").split(",").filter(Boolean) : [];
+          return (
+            <div key={q.key}>
+              <div className="flex items-baseline gap-2">
+                <span className="text-[13px] font-semibold text-slate-800">{q.label}</span>
+                {q.multi && <span className="text-[11px] text-slate-400">여러 개 선택</span>}
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {options.map((o) => {
+                  const on = q.multi ? cur.includes(String(o.value)) : values[q.key] === o.value;
+                  return (
+                    <button
+                      key={String(o.value)}
+                      type="button"
+                      onClick={() => choose(q, o.value)}
+                      aria-pressed={on}
+                      className={`rounded-full px-3 py-1.5 text-[13px] transition-colors ${
+                        on
+                          ? "bg-purple-600 text-white shadow-sm"
+                          : "bg-purple-50/80 text-purple-800 ring-1 ring-purple-200/70 hover:bg-purple-100"
+                      }`}
+                    >
+                      #{o.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3.5 text-[13px]">
+        <button type="button" onClick={onDone} className="font-medium text-slate-500 hover:text-slate-800">
+          건너뛰기
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="rounded-xl bg-purple-600 px-4 py-2 font-semibold text-white shadow-sm shadow-purple-500/30 hover:bg-purple-700"
+        >
+          {picked ? `완료 (${picked}개 선택)` : "완료"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // 첫 방문 환영 팝업: 쇼핑몰의 '맞춤 정보 입력'처럼 환영 → 질문 → 요약 순서로 진행한다.
 // intro가 false면 환영 화면 없이 질문부터 시작한다 (나중에 '내 정보 입력하기'로 열었을 때).
 export function WelcomeModal({
@@ -538,12 +636,11 @@ export function WelcomeModal({
   // 기본 정보부터 / 추가 조건부터
   startGroup?: InfoGroup;
 }) {
-  const [stage, setStage] = useState<"welcome" | "questions" | "done">(intro ? "welcome" : "questions");
-  const [group, setGroup] = useState<InfoGroup>(startGroup);
-  // 추가 조건 단계에 처음 들어갈 때는 첫 질문부터 (startKey는 처음 연 묶음에만 쓴다)
-  const [qStart, setQStart] = useState<InfoKey | undefined>(startKey);
+  // 환영 → 기본 정보(한 문항씩) → 추가 조건(한 화면에 전부) → 요약
+  const [stage, setStage] = useState<"welcome" | "basic" | "extra" | "done">(
+    intro ? "welcome" : startGroup === "extra" ? "extra" : "basic"
+  );
   const filled = INFO_QUESTIONS.filter((q) => isFilled(values[q.key]));
-  const extraLeft = questionsOf("extra").filter((q) => !isFilled(values[q.key]) && !q.skipIf?.(values)).length;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -557,7 +654,9 @@ export function WelcomeModal({
         role="dialog"
         aria-modal="true"
         aria-label="내 정보 입력"
-        className="relative w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl animate-scale-in sm:p-7"
+        className={`relative w-full rounded-3xl bg-white p-6 shadow-2xl animate-scale-in sm:p-7 ${
+          stage === "extra" ? "max-w-2xl" : "max-w-lg"
+        }`}
       >
         {stage === "welcome" && (
           <div className="text-center">
@@ -569,8 +668,7 @@ export function WelcomeModal({
             >
               <X className="h-4 w-4" />
             </button>
-            <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-purple-100 text-2xl">🎁</div>
-            <h2 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">공고패스에 오신 걸 환영해요</h2>
+            <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">공고패스에 오신 걸 환영해요</h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-500">
               몇 가지만 알려 주시면 받을 수 있는 지원금과
               <br />
@@ -583,10 +681,10 @@ export function WelcomeModal({
                 </span>
               ))}
             </div>
-            <p className="mt-2.5 text-xs text-slate-400">원하면 혼인·자녀·학력·병역·우대 조건 등 추가 조건도 입력할 수 있어요.</p>
+            <p className="mt-2.5 text-xs text-slate-400">혼인·자녀·학력·병역·우대 조건 등 추가 조건은 한 화면에서 해당하는 것만 고르면 돼요.</p>
             <button
               type="button"
-              onClick={() => setStage("questions")}
+              onClick={() => setStage("basic")}
               className="mt-7 w-full rounded-2xl bg-purple-600 py-3.5 text-[15px] font-semibold text-white shadow-sm shadow-purple-500/30 transition-colors hover:bg-purple-700"
             >
               내 정보 입력하기
@@ -598,23 +696,25 @@ export function WelcomeModal({
           </div>
         )}
 
-        {stage === "questions" && (
+        {stage === "basic" && (
           <InfoOnboarding
-            key={group}
             values={values}
             onSet={onSet}
             onClose={onClose}
-            onFinish={() => setStage("done")}
-            startKey={qStart}
+            onFinish={() => setStage("extra")}
+            startKey={startGroup === "basic" ? startKey : undefined}
             variant="modal"
-            group={group}
+            group="basic"
           />
+        )}
+
+        {stage === "extra" && (
+          <ExtraConditions values={values} onSet={onSet} onClose={onClose} onDone={() => setStage("done")} />
         )}
 
         {stage === "done" && (
           <div className="text-center">
-            <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-emerald-100 text-2xl">✨</div>
-            <h2 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">
+            <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
               {filled.length ? "준비 완료!" : "나중에 언제든 입력할 수 있어요"}
             </h2>
             <p className="mt-2 text-sm text-slate-500">
@@ -632,29 +732,12 @@ export function WelcomeModal({
                 ))}
               </div>
             )}
-            {/* 기본 정보를 마쳤으면 추가 조건을 이어서 입력할 수 있게 */}
-            {group === "basic" && extraLeft > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setGroup("extra");
-                  setQStart(firstMissing(values, "extra"));
-                  setStage("questions");
-                }}
-                className="mt-6 w-full rounded-2xl border border-purple-200 bg-purple-50/60 px-4 py-3 text-left transition-colors hover:bg-purple-50"
-              >
-                <span className="block text-sm font-semibold text-purple-800">추가 조건도 입력하기 · 선택</span>
-                <span className="mt-0.5 block text-xs text-purple-700/80">
-                  혼인·자녀·학력·병역·재산·우대 조건 등 {extraLeft}개 · 더 많은 공고를 정확히 걸러 드려요
-                </span>
-              </button>
-            )}
             <button
               type="button"
               onClick={onClose}
-              className={`${group === "basic" && extraLeft > 0 ? "mt-2.5" : "mt-7"} w-full rounded-2xl bg-purple-600 py-3.5 text-[15px] font-semibold text-white shadow-sm shadow-purple-500/30 transition-colors hover:bg-purple-700`}
+              className="mt-7 w-full rounded-2xl bg-purple-600 py-3.5 text-[15px] font-semibold text-white shadow-sm shadow-purple-500/30 transition-colors hover:bg-purple-700"
             >
-              {group === "basic" && extraLeft > 0 ? "이대로 시작하기" : "공고패스 시작하기"}
+              공고패스 시작하기
             </button>
             {filled.length > 0 && <p className="mt-2 text-[11px] text-slate-400">입력창 위 태그를 누르면 언제든 고칠 수 있어요.</p>}
           </div>
