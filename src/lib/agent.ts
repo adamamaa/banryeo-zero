@@ -260,10 +260,12 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
   // 진행 단계: (계획) 도구 실행 → 답변 정리 → 답변 검증 → 완료
   type Phase = "tools" | "write" | "verify" | "done";
   const show = (thought: string, phase: Phase | boolean = "tools") => {
-    const p: Phase = phase === true ? "write" : phase === false ? "tools" : phase;
-    const order = { tools: 0, write: 1, verify: 2, done: 3 }[p];
+    let p: Phase = phase === true ? "write" : phase === false ? "tools" : phase;
     const planned = plan.filter((x) => x.tool !== "answer");
     const firstOpen = planned.findIndex((x) => !x.done);
+    // 계획한 도구를 다 썼으면 AI가 답을 쓰는 중이므로 '답변 정리'를 진행 중으로 보여 준다 (회전 표시가 사라지지 않게)
+    if (p === "tools" && plan.length && firstOpen < 0) p = "write";
+    const order = { tools: 0, write: 1, verify: 2, done: 3 }[p];
     emit?.("step", {
       steps: [
         ...baseSteps.map((label): Step => ({ label, status: "done" })),
@@ -641,6 +643,8 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
     }
 
     contents.push({ role: "user", parts: responses });
+    // 다음 차례를 기다리는 동안에도 진행 상태를 갱신한다 (남은 계획 단계 또는 '답변 정리'가 회전)
+    show(thought.slice(-140) || "도구 결과를 바탕으로 다음 단계를 진행하고 있습니다.");
   }
   return { ok: false, error: "도구 호출 횟수 제한을 넘었습니다.", traces };
 }

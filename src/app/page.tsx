@@ -44,7 +44,7 @@ import {
   type InfoValues,
 } from "@/components/InfoOnboarding";
 import { AfterCare, BenefitCombo, DocCalendar, NearMissCard, PolicyNearMissCard } from "@/components/Insights";
-import { SidebarRecs } from "@/components/SidebarRecs";
+import { SidebarRecs, type LiveNotices } from "@/components/SidebarRecs";
 import { nearMiss } from "@/lib/nearMiss";
 import type { BenefitCtx } from "@/lib/benefits";
 
@@ -314,6 +314,8 @@ export default function Page() {
   const [welcome, setWelcome] = useState<{ intro: boolean; startKey?: InfoKey; group?: InfoGroup } | null>(null);
   // 알아서 다시 점검: 내 정보가 바뀌었거나 마감이 다가올 때 바뀐 점
   const [recheck, setRecheck] = useState<{ items: RecheckItem[]; at: number } | null>(null);
+  // 보조금24 실시간 공고 (내 지역·관심 분야 기준)
+  const [live, setLive] = useState<LiveNotices>({ status: "idle", notices: [] });
   const [tools, setTools] = useState<ToolExecution[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -577,6 +579,57 @@ export default function Page() {
     if (loaded && !onboard && !welcome && !working && hasProfileInput(profile)) fetchTools();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboard, welcome, loaded]);
+
+  // 보조금24 실시간 공고: 지역·관심 분야가 바뀌면 다시 조회한다 (서버가 10분 캐시)
+  const liveKey = [
+    extra.sido, extra.sigungu, extra.interests, profile.age, extra.job, extra.marriage, extra.children, extra.education, extra.special, extra.company,
+  ].join("|");
+  useEffect(() => {
+    if (!loaded || welcome || !(extra.sido || extra.interests)) return;
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      setLive((l) => ({ ...l, status: "loading" }));
+      try {
+        const res = await fetch("/api/agent/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "gov24_recommend",
+            publicDataApiKey: publicKey || undefined,
+            sido: extra.sido,
+            sigungu: extra.sigungu,
+            interests: extra.interests ? extra.interests.split(",") : [],
+            // 온통청년은 나이·취업상태·혼인·학력·우대 조건 코드로 거른다
+            age: profile.age === "" ? undefined : profile.age,
+            job: extra.job,
+            marriage: extra.marriage,
+            children: extra.children,
+            education: extra.education,
+            special: extra.special ? extra.special.split(",") : [],
+            company: extra.company,
+          }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        setLive(
+          data.connected
+            ? {
+                status: "ok",
+                notices: Array.isArray(data.notices) ? data.notices : [],
+                sources: Array.isArray(data.sources) ? data.sources : [],
+              }
+            : { status: data.reason === "no_key" ? "no_key" : "error", notices: [] }
+        );
+      } catch {
+        if (!cancelled) setLive({ status: "error", notices: [] });
+      }
+    }, 600);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveKey, loaded, welcome]);
 
   // 알아서 다시 점검: 내 정보가 바뀌면 받을 수 있는 지원과 판정을 다시 계산해 지난 점검과 비교하고,
   // 받을 수 있는 공고의 마감이 7일 안이면 알린다 (하루에 한 번). 브라우저 계산만 쓴다.
@@ -1572,6 +1625,7 @@ export default function Page() {
                 onAsk={(q) => send(undefined, q)}
                 busy={working}
                 search={sidebarSearch.trim().toLowerCase()}
+                live={live}
               />
               <div>
                 <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block px-2.5 mb-1.5">
@@ -1952,7 +2006,8 @@ export default function Page() {
             </div>
           </div>
 
-          <div className="shrink-0 px-6 md:px-8 pb-3 max-w-3xl mx-auto w-full space-y-3">
+          {/* 입력창을 화면 맨 아래에 붙인다 (아래 안내 문구 줄은 뺐다) */}
+          <div className="shrink-0 px-6 md:px-8 pb-4 max-w-3xl mx-auto w-full space-y-3">
             {recheck && (
               <RecheckCard
                 items={recheck.items}
@@ -1968,12 +2023,6 @@ export default function Page() {
             {infoCard}
             {promptCard}
           </div>
-
-          <footer className="h-10 px-6 shrink-0 flex items-center justify-center border-t border-transparent text-[11px] text-slate-400">
-            <p className="text-center truncate">
-              사전 점검 도우미 결과이며 최종 판정은 접수 기관이 합니다.
-            </p>
-          </footer>
         </main>
 
       {/* ───────── 결과 패널 ───────── */}
@@ -3990,7 +4039,7 @@ function PlanLine({ plan, verified }: { plan: PlanStep[]; verified?: boolean }) 
       {verified !== undefined && (
         <>
           <ArrowRight className="h-3 w-3 text-slate-300" aria-hidden />
-          <span className={verified ? "text-emerald-700" : "text-amber-700"}>답변 검증 {verified ? "✓" : "!"}</span>
+          <span className={verified ? "text-purple-700" : "text-amber-700"}>답변 검증 {verified ? "✓" : "!"}</span>
         </>
       )}
     </div>
@@ -4005,7 +4054,7 @@ function VerifyBadge({ v }: { v: Verification }) {
     <details className="group text-xs">
       <summary
         className={`inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full px-2.5 py-1 font-medium ring-1 ${
-          v.passed ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-800 ring-amber-200"
+          v.passed ? "bg-purple-50 text-purple-700 ring-purple-200" : "bg-amber-50 text-amber-800 ring-amber-200"
         }`}
       >
         {v.passed ? <Check className="h-3.5 w-3.5" strokeWidth={2.5} /> : <CircleAlert className="h-3.5 w-3.5" />}
@@ -4016,7 +4065,7 @@ function VerifyBadge({ v }: { v: Verification }) {
       <ul className="mt-2 space-y-1 rounded-xl border border-slate-200 bg-white p-3">
         {v.checks.map((c) => (
           <li key={c.name} className="flex gap-2">
-            <span className={`shrink-0 font-medium ${c.ok ? "text-emerald-600" : c.severity === "fix" ? "text-amber-700" : "text-slate-500"}`}>
+            <span className={`shrink-0 font-medium ${c.ok ? "text-purple-600" : c.severity === "fix" ? "text-amber-700" : "text-slate-500"}`}>
               {c.ok ? "✓" : "!"} {c.name}
             </span>
             <span className="text-slate-500">{c.note}</span>

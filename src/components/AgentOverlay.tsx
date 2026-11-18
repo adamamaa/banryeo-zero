@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Check, LoaderCircle, Sparkles } from "lucide-react";
+import { Check, ChevronDown, LoaderCircle, Sparkles } from "lucide-react";
 
 export interface AgentPlanStep {
   label: string;
@@ -63,11 +63,49 @@ export function AgentPlanCard({
     return () => window.clearInterval(timer);
   }, [thought, paused]);
 
+  // 접기: 접으면 지금 하는 단계 한 줄만 보인다 (상태는 브라우저에 기억)
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => setCollapsed(localStorage.getItem("gonggopass_plan_collapsed") === "1"), []);
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem("gonggopass_plan_collapsed", next ? "1" : "0");
+  };
+  const current = steps.find((s) => s.status === "active") || steps.filter((s) => s.status === "done").pop();
+  const doneCount = steps.filter((s) => s.status === "done").length;
 
   return (
     <div className="w-full max-w-[460px] animate-fade-up rounded-2xl border border-purple-200/90 bg-white/95 p-3 shadow-[0_10px_28px_-14px_rgba(109,40,217,0.22)]">
-      {/* 할 일 목록: 점선 원 = 대기, 회전 = 진행 중, 체크 = 완료 */}
       {steps.length > 0 && (
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={!collapsed}
+          className={`flex w-full items-center gap-2 text-left text-[13px] ${collapsed ? "" : "mb-2 border-b border-slate-100 pb-2"}`}
+        >
+          {collapsed ? (
+            <>
+              {!paused && current?.status === "active" ? (
+                <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-purple-500" />
+              ) : (
+                <Sparkles className="h-4 w-4 shrink-0 text-purple-500" />
+              )}
+              <span className="min-w-0 flex-1 truncate font-medium text-slate-800">{current?.label || "AI 작업 중"}</span>
+            </>
+          ) : (
+            <span className="flex-1 text-xs font-semibold text-purple-700">AI 작업 단계</span>
+          )}
+          <span className="tnum shrink-0 text-xs text-slate-400">
+            {doneCount}/{steps.length}
+          </span>
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${collapsed ? "" : "rotate-180"}`}
+            aria-label={collapsed ? "단계 펼치기" : "단계 접기"}
+          />
+        </button>
+      )}
+      {/* 할 일 목록: 점선 원 = 대기, 회전 = 진행 중, 체크 = 완료 */}
+      {steps.length > 0 && !collapsed && (
         <ol className="space-y-1.5">
           {steps.map((st, idx) => (
             <li
@@ -96,7 +134,7 @@ export function AgentPlanCard({
         </ol>
       )}
 
-      {typed && (
+      {typed && !collapsed && (
         <p className={`text-xs leading-relaxed text-slate-600 ${steps.length ? "mt-2 border-t border-slate-100 pt-2" : ""}`}>
           <span className="mr-1.5 font-semibold text-purple-600">AI 판단</span>
           <span>{typed}</span>

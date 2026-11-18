@@ -4,13 +4,43 @@ import React, { useEffect, useState } from "react";
 import { Bell, BellRing, CalendarPlus, ExternalLink, FileText, Megaphone, MessageCircle, Plus, X } from "lucide-react";
 import { BENEFITS, bestCombo, type Benefit, type BenefitCtx } from "@/lib/benefits";
 import { downloadIcs } from "@/lib/ics";
+import { guessValidDays, type Gov24Notice } from "@/lib/gov24";
+
+// 보조금24 실시간 공고 조회 상태 (page에서 받아 온다)
+export interface LiveNotices {
+  status: "idle" | "loading" | "ok" | "no_key" | "error";
+  notices: Gov24Notice[];
+  // 연결된 출처 (보조금24, 온통청년)
+  sources?: string[];
+}
+
+// 알림 일정을 만드는 데 필요한 공고 정보 (예시 정책과 실시간 공고 공통)
+type AlarmSource = Pick<Benefit, "id" | "name" | "applyStart" | "applyEnd" | "url" | "docs">;
+
+const liveId = (n: Gov24Notice) => `${n.source || "gov24"}:${n.id}`;
+const sourceLabel = (n?: Gov24Notice) => (n?.source === "youth" ? "온통청년" : n?.source === "welfare" ? "복지로" : "보조금24");
+const liveToBenefit = (n: Gov24Notice): Benefit => ({
+  id: liveId(n),
+  name: n.name,
+  org: n.org,
+  amount: 0,
+  amountText: n.summary || "지원 내용은 신청처에서 확인하세요",
+  kind: "현금",
+  conflicts: [],
+  check: () => ({ status: "ok", reason: `${sourceLabel(n)} 실시간 공고` }),
+  applyStart: n.applyStart,
+  applyEnd: n.applyEnd,
+  url: n.url,
+  docs: n.docs.map((d) => ({ name: d, validDays: guessValidDays(d) })),
+});
 
 // 왼쪽 사이드바: 내 정보 기반 추천 공고 + 공고(마감)·서류(발급일) 알림.
 // 알림 설정은 브라우저(localStorage)에만 저장하고, 사이트가 열려 있으면 브라우저 알림을 띄운다.
 // 사이트를 닫아도 받으려면 '캘린더에 넣기'(.ics)로 휴대폰·구글 캘린더에 등록한다.
 
 type AlarmKind = "deadline" | "docs";
-type Prefs = Record<string, Partial<Record<AlarmKind, boolean>>>;
+// 실시간 공고는 목록이 바뀌어도 알림이 유지되게 공고 정보(src)를 함께 저장한다
+type Prefs = Record<string, Partial<Record<AlarmKind, boolean>> & { src?: AlarmSource }>;
 
 interface AlarmEvent {
   id: string;
@@ -37,7 +67,7 @@ const dday = (d: Date, today: Date) => {
 };
 
 // 공고 하나에 대해 켜 둔 알림의 일정을 만든다
-function eventsFor(b: Benefit, pref: Partial<Record<AlarmKind, boolean>>, today: Date): AlarmEvent[] {
+function eventsFor(b: AlarmSource, pref: Partial<Record<AlarmKind, boolean>>, today: Date): AlarmEvent[] {
   const out: AlarmEvent[] = [];
   const start = parse(b.applyStart);
   const end = parse(b.applyEnd);
@@ -101,6 +131,7 @@ export function SidebarRecs({
   onAsk,
   busy,
   search,
+  live,
 }: {
   ctx: BenefitCtx;
   hasInfo: boolean;
@@ -108,6 +139,7 @@ export function SidebarRecs({
   onAsk: (q: string) => void;
   busy: boolean;
   search: string;
+  live?: LiveNotices;
 }) {
   const [prefs, setPrefs] = useState<Prefs>({});
   const [openId, setOpenId] = useState<string | null>(null);
@@ -122,8 +154,12 @@ export function SidebarRecs({
   // 추천: 받을 수 있는 정책 중 마감 안 지난 것. 겹치는 정책은 '중복 주의'로 뒤에 둔다
   const combo = hasInfo ? bestCombo(ctx) : null;
   const notExpired = (b: Benefit) => !b.applyEnd || parse(b.applyEnd)! >= today;
+  // 보조금24 실시간 공고를 맨 위에, 그다음 예시 정책 조합
+  const liveNotices = hasInfo && live?.status === "ok" ? live.notices : [];
+  const liveById = new Map(liveNotices.map((n) => [liveId(n), n]));
   const recs = combo
     ? [
+        ...liveNotices.map((n) => ({ b: liveToBenefit(n), note: "" })),
         ...combo.chosen.map((b) => ({ b, note: "" })),
         ...combo.dropped.map((d) => ({ b: d.b, note: `중복 주의: ${d.because.name.replace(/\s*\(.*\)$/, "")}` })),
       ]
@@ -131,9 +167,13 @@ export function SidebarRecs({
         .filter((r) => !search || r.b.name.toLowerCase().includes(search))
     : [];
 
-  const events = BENEFITS.flatMap((b) => (prefs[b.id] ? eventsFor(b, prefs[b.id], today) : [])).sort(
-    (a, b) => a.date.getTime() - b.date.getTime()
-  );
+  const events = Object.entries(prefs)
+    .flatMap(([id, pref]) => {
+      const src: AlarmSource | undefined =
+        BENEFITS.find((b) => b.id === id) || (liveById.has(id) ? liveToBenefit(liveById.get(id)!) : pref.src);
+      return src ? eventsFor(src, pref, today) : [];
+    })
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
   const due = events.filter((e) => diff(e.date, today) <= 0);
 
   // 사이트가 열려 있는 동안 오늘 알림을 브라우저 알림으로 띄운다 (한 번만)
@@ -162,7 +202,9 @@ export function SidebarRecs({
   }, [perm, JSON.stringify(prefs)]);
 
   const setPref = async (id: string, kind: AlarmKind, on: boolean) => {
-    const next: Prefs = { ...prefs, [id]: { ...prefs[id], [kind]: on } };
+    const live = liveById.get(id);
+    const src = live ? (({ id: i, name, applyStart, applyEnd, url, docs }) => ({ id: i, name, applyStart, applyEnd, url, docs }))(liveToBenefit(live)) : prefs[id]?.src;
+    const next: Prefs = { ...prefs, [id]: { ...prefs[id], [kind]: on, ...(src && { src }) } };
     if (!next[id].deadline && !next[id].docs) delete next[id];
     setPrefs(next);
     localStorage.setItem(PREFS_KEY, JSON.stringify(next));
@@ -183,8 +225,14 @@ export function SidebarRecs({
   return (
     <>
       <div>
-        <span className="mb-1.5 block px-2.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+        <span className="mb-1.5 flex items-center gap-1.5 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
           추천 공고
+          {hasInfo && live?.status === "loading" && <span className="font-normal normal-case tracking-normal">· 실시간 공고 조회 중</span>}
+          {hasInfo && live?.status === "ok" && (
+            <span className="font-normal normal-case tracking-normal text-purple-600">
+              · 실시간 {live.notices.length}건{live.sources?.length ? ` (${live.sources.join("·")})` : ""}
+            </span>
+          )}
         </span>
         {!hasInfo ? (
           <button
@@ -216,6 +264,16 @@ export function SidebarRecs({
                     className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left"
                   >
                     <span className={`min-w-0 flex-1 truncate ${note ? "text-slate-500" : "text-slate-700"}`}>{b.name}</span>
+                    {liveById.has(b.id) && (
+                      <span
+                        className={`shrink-0 rounded px-1 py-px text-[9px] font-semibold text-white ${
+                          liveById.get(b.id)?.source === "youth" ? "bg-purple-500" : "bg-purple-700"
+                        }`}
+                        title={`${sourceLabel(liveById.get(b.id))} 실시간 공고`}
+                      >
+                        실시간
+                      </span>
+                    )}
                     {end ? (
                       <span
                         className={`tnum shrink-0 rounded px-1 py-px text-[10px] font-medium ${
@@ -238,8 +296,12 @@ export function SidebarRecs({
                       <div className="leading-snug">
                         <span className="font-medium text-slate-700">{b.amountText}</span>
                         <span className="block">
-                          {b.org} · {period(b)}
+                          {b.org} · {!b.applyEnd && liveById.get(b.id)?.deadlineText ? liveById.get(b.id)!.deadlineText : period(b)}
                         </span>
+                        {liveById.has(b.id) && <span className="block text-purple-600">출처: {sourceLabel(liveById.get(b.id))} 실시간</span>}
+                        {liveById.get(b.id)?.target && (
+                          <span className="mt-0.5 block line-clamp-2">대상: {liveById.get(b.id)!.target}</span>
+                        )}
                         {note && <span className="block text-amber-700">{note} (둘 중 하나만)</span>}
                       </div>
                       <div className="space-y-1 rounded-md bg-slate-50 p-2">
@@ -293,7 +355,15 @@ export function SidebarRecs({
                 </div>
               );
             })}
-            <p className="px-2.5 pt-1 text-[10px] text-slate-400">일정·서류는 시연용 예시예요. 공고 원문을 확인하세요.</p>
+            <p className="px-2.5 pt-1 text-[10px] text-slate-400">
+              {live?.status === "ok"
+                ? "'실시간'은 온통청년·복지로·보조금24 공고, 나머지는 시연용 예시예요. 공고 원문을 확인하세요."
+                : live?.status === "no_key"
+                ? "일정·서류는 시연용 예시예요. 공공데이터포털·온통청년 키를 넣으면 실시간 공고가 함께 떠요."
+                : live?.status === "error"
+                ? "보조금24 조회에 실패해 시연용 예시만 보여요."
+                : "일정·서류는 시연용 예시예요. 공고 원문을 확인하세요."}
+            </p>
           </div>
         )}
       </div>

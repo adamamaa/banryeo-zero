@@ -5,6 +5,9 @@ import { runToolChain, fetchGov24Services, subsidyKeyword, type ToolExecution } 
 import { POLICY_SCENARIOS } from "@/data/policies";
 import { CARD_FORMAT, parseCard, parsePolicy, cardToText, type PolicyDetail } from "@/lib/card";
 import { runAgent } from "@/lib/agent";
+import { recommendGov24, type Gov24Notice } from "@/lib/gov24";
+import { recommendYouth } from "@/lib/youthcenter";
+import { recommendWelfare } from "@/lib/welfare";
 
 interface UploadedDoc {
   fileName: string;
@@ -192,6 +195,79 @@ export async function POST(req: NextRequest) {
           ? { connected: true, message: `보조금24 연결됨 · 조회 ${services.length}건` }
           : { connected: false, message: "보조금24 조회에 실패했습니다. 키와 활용신청 상태를 확인하세요." }
       );
+    }
+
+    // 내 정보로 실시간 공고를 찾는다: 보조금24(전체 공공서비스) + 온통청년(청년정책, 조건 코드로 거름)
+    if (action === "gov24_recommend") {
+      const pk = String(body.publicDataApiKey || process.env.PUBLIC_DATA_API_KEY || "").trim();
+      const yk = String(process.env.YOUTHCENTER_API_KEY || "").trim();
+      if (!pk && !yk) return NextResponse.json({ connected: false, reason: "no_key", notices: [], sources: [] });
+      const clean = (v: unknown) => (typeof v === "string" ? v.replace(/[^0-9A-Za-z가-힣·\s]/g, "").slice(0, 20) : "");
+      const list = (v: unknown) => (Array.isArray(v) ? v : []).map(clean).filter(Boolean).slice(0, 8);
+      const interests = list(body.interests).slice(0, 3);
+      const age = Number.isFinite(Number(body.age)) && body.age !== "" && body.age != null ? Number(body.age) : null;
+
+      const [gov, youth, welfare] = await Promise.all([
+        pk
+          ? recommendGov24(pk, { sido: clean(body.sido), sigungu: clean(body.sigungu), interests }).then(
+              (n) => ({ ok: true, n }),
+              () => ({ ok: false, n: [] as Gov24Notice[] })
+            )
+          : Promise.resolve({ ok: false, n: [] as Gov24Notice[] }),
+        yk
+          ? recommendYouth(yk, {
+              sido: clean(body.sido),
+              age,
+              job: clean(body.job),
+              marriage: clean(body.marriage),
+              education: clean(body.education),
+              special: list(body.special),
+              company: clean(body.company),
+              interests,
+            }).then(
+              (n) => ({ ok: true, n }),
+              () => ({ ok: false, n: [] as Gov24Notice[] })
+            )
+          : Promise.resolve({ ok: false, n: [] as Gov24Notice[] }),
+        // 복지로 지자체 복지서비스 (같은 공공데이터포털 키)
+        pk
+          ? recommendWelfare(pk, {
+              sido: clean(body.sido),
+              sigungu: clean(body.sigungu),
+              special: list(body.special),
+              interests,
+              marriage: clean(body.marriage),
+              children: clean(body.children),
+            }).then(
+              (n) => ({ ok: true, n }),
+              () => ({ ok: false, n: [] as Gov24Notice[] })
+            )
+          : Promise.resolve({ ok: false, n: [] as Gov24Notice[] }),
+      ]);
+      if (!gov.ok && !youth.ok && !welfare.ok)
+        return NextResponse.json({ connected: false, reason: "error", notices: [], sources: [] });
+
+      // 순서: 온통청년(조건 코드로 거름) → 복지로 지자체(내 시군구) → 보조금24. 이름이 겹치면 하나만 둔다
+      const norm = (name: string) => name.replace(/[\s()·\-[\]]/g, "").replace(/^20\d{2}(년)?/, "");
+      const notices: Gov24Notice[] = [];
+      const add = (list: Gov24Notice[], max: number) => {
+        let n = 0;
+        for (const x of list) {
+          if (n >= max) break;
+          if (notices.some((y) => norm(y.name).includes(norm(x.name)) || norm(x.name).includes(norm(y.name)))) continue;
+          notices.push(x);
+          n++;
+        }
+      };
+      add(youth.n, 5);
+      add(welfare.n, 3);
+      add(gov.n, 3);
+      add(youth.n, 10); // 자리가 남으면 온통청년으로 채운다
+      return NextResponse.json({
+        connected: true,
+        sources: [...(youth.ok ? ["온통청년"] : []), ...(welfare.ok ? ["복지로"] : []), ...(gov.ok ? ["보조금24"] : [])],
+        notices: notices.slice(0, 10),
+      });
     }
 
     if (action === "ocr_audit_docs") {
