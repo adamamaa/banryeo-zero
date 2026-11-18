@@ -16,20 +16,17 @@ import {
   PanelRight,
   Paperclip,
   Plus,
-  RefreshCw,
   Square,
   ListChecks,
   Plug,
   Trash2,
   X,
 } from "lucide-react";
-import { POLICY_SCENARIOS } from "@/data/policies";
 import type { ToolExecution, ToolSource } from "@/lib/tools";
 import type { AuditResult } from "@/lib/docRules";
 import type { AnswerCard, PolicyDetail } from "@/lib/card";
 import type { AgentAsk, AgentChecklist, AgentDraft, PlanStep } from "@/lib/agent";
 import type { Verification } from "@/lib/verify";
-import { diffSnapshots, takeSnapshot, upcomingDeadlines, type RecheckItem, type Snapshot } from "@/lib/recheck";
 import { AgentOverlay, AgentPlanCard, type AgentPlanStep, type AgentTarget } from "@/components/AgentOverlay";
 import {
   InfoOnboarding,
@@ -43,21 +40,14 @@ import {
   type InfoValue,
   type InfoValues,
 } from "@/components/InfoOnboarding";
-import { AfterCare, BenefitCombo, DocCalendar, NearMissCard, PolicyNearMissCard } from "@/components/Insights";
+import { LiveBenefitsPanel, LiveDocsPanel, PolicyNearMissCard } from "@/components/Insights";
 import { SidebarRecs, type LiveNotices } from "@/components/SidebarRecs";
-import { nearMiss } from "@/lib/nearMiss";
-import type { BenefitCtx } from "@/lib/benefits";
-
-const policy = POLICY_SCENARIOS[0];
-const form = policy.applicationFormTemplate;
 
 // 패널 탭: 받을 돈(combo) → 서류 준비(recipe) → 제출(audit: 사전 검수 + 신청 패키지)
 type View = "answer" | "combo" | "recipe" | "audit";
 const PANEL_VIEWS: View[] = ["answer", "combo", "recipe", "audit"];
 // 예전 대화에 저장된 탭: 신청 패키지는 제출로, 실행 내역·자격 판정은 받을 돈으로 연다
 const toView = (v: string): View => (v === "package" ? "audit" : PANEL_VIEWS.includes(v as View) ? (v as View) : "combo");
-type MissionKey = "all" | "triage" | "recipe" | "audit_defect" | "audit_fixed";
-type AuditMode = "defect" | "fixed" | "upload";
 type Verdict = "eligible" | "needs_parent_check" | "ineligible";
 
 interface Summary {
@@ -84,14 +74,6 @@ const EMPTY_PROFILE: ProfileInput = {
   depositManwon: "",
   rentManwon: "",
   sepMonths: "",
-};
-
-const DEMO_PROFILE: Profile = {
-  age: 26,
-  incomeManwon: 130,
-  depositManwon: 1000,
-  rentManwon: 75,
-  sepMonths: 15,
 };
 
 const toProfile = (p: ProfileInput): Profile => ({
@@ -144,13 +126,11 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   time: string;
-  demo?: boolean;
   pending?: boolean;
   error?: boolean;
   attachments?: string[];
   traces?: ToolExecution[];
   artifact?: { view: View; title: string; meta: string };
-  followUps?: MissionKey[];
   sources?: { title: string; url: string; registered?: boolean }[];
   // AI가 판정에 필요한 정보를 되물은 경우. answer는 사용자가 답한 값
   ask?: AgentAsk & { answer?: string };
@@ -171,8 +151,6 @@ interface Staged {
   mimeType: string;
   base64OrText: string;
 }
-
-const REGION = "서울특별시 관악구 봉천로 123, 301호";
 
 // 사이드바·오른쪽 패널 너비 범위 (px)
 const SIDE_DEFAULT = 270;
@@ -249,17 +227,6 @@ const SOURCE: Record<ToolSource, { label: string; cls: string; hint: string }> =
     cls: "bg-brand-50 text-brand-700 ring-brand-600/20",
     hint: "외부 API 실시간 응답",
   },
-};
-
-const MISSIONS: Record<
-  MissionKey,
-  { no: string; label: string; sub: string; steps: number[]; view: View; mode?: "defect" | "fixed" }
-> = {
-  triage: { no: "1", label: "자격 판정", sub: "소득·월세 요건과 특례 조항 확인", steps: [1, 2, 3, 4, 5], view: "combo" },
-  recipe: { no: "2", label: "발급 가이드", sub: "필요한 서류와 발급 옵션", steps: [6], view: "recipe" },
-  audit_defect: { no: "3", label: "사전 검수", sub: "예시 서류 세트 A (미비)", steps: [7, 8], view: "audit", mode: "defect" },
-  audit_fixed: { no: "4", label: "재검수 · 신청 패키지", sub: "예시 서류 세트 B (보완)", steps: [8, 9], view: "audit", mode: "fixed" },
-  all: { no: "", label: "전체 흐름 실행", sub: "1~4단계 연속 실행", steps: [1, 2, 3, 4, 5, 6, 7, 8, 9], view: "combo" },
 };
 
 const VERDICT: Record<Verdict, { title: string; body: string; cls: string }> = {
@@ -370,8 +337,6 @@ export default function Page() {
   const [onboard, setOnboard] = useState<{ startKey?: InfoKey; single: boolean } | null>(null);
   // 첫 방문 환영 팝업 (intro: 환영 화면부터, false면 질문부터)
   const [welcome, setWelcome] = useState<{ intro: boolean; startKey?: InfoKey; group?: InfoGroup } | null>(null);
-  // 알아서 다시 점검: 내 정보가 바뀌었거나 마감이 다가올 때 바뀐 점
-  const [recheck, setRecheck] = useState<{ items: RecheckItem[]; at: number } | null>(null);
   // 실시간 공고 (온통청년·복지로·보조금24, 내 정보 기준)
   const [live, setLive] = useState<LiveNotices>({ status: "idle", notices: [] });
   const [liveNonce, setLiveNonce] = useState(0);
@@ -380,18 +345,8 @@ export default function Page() {
     forceRefreshRef.current = true;
     setLiveNonce((n) => n + 1);
   };
-  const [tools, setTools] = useState<ToolExecution[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [toolsLoading, setToolsLoading] = useState(false);
-
-  const [auditMode, setAuditMode] = useState<AuditMode>("defect");
-  // 시연 실행으로 예시 서류 세트를 연 적이 있는지 (없으면 검수·패키지 탭은 비워 둔다)
-  const [demoAudit, setDemoAudit] = useState(false);
   const [upload, setUpload] = useState<{ result: AuditResult; mode: string; note?: string } | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [clauseId, setClauseId] = useState("clause-special");
-  const [doneDocs, setDoneDocs] = useState<Record<string, boolean>>({});
-  const [essay, setEssay] = useState(form.generatedEssayDraft);
   const [downloaded, setDownloaded] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -403,8 +358,8 @@ export default function Page() {
   const [focusId, setFocusId] = useState<string | null>(null);
   // AI가 되물은 정보의 상태: waiting(답 대기) → resolved(답 반영 후 재판정)
   const [askState, setAskState] = useState<{ status: "waiting" | "resolved"; question: string; reason?: string; answer?: string } | null>(null);
-  // 패널 탭들의 기준 정책: "demo"(청년월세 시연 공고) 또는 "메시지id#정책순번"
-  const [ctx, setCtx] = useState("demo");
+  // 패널 탭들의 기준 정책: "메시지id#정책순번" 또는 시연 시 "demo"
+  const [ctx, setCtx] = useState("");
   // 정책별 자격 응답·서류 준비·검수 결과 (브라우저에 저장)
   const [policyState, setPolicyState] = useState<Record<string, PolicyState>>({});
   // 이전에 안내한 정책 정보. 다음 질문에 함께 보내 같은 정책은 같은 값으로 답하게 한다.
@@ -450,28 +405,20 @@ export default function Page() {
   const myTools = allTools.filter((t) => addedIds.includes(t.id));
 
   const panelHasData =
-    messages.length > 0 || tools.length > 0 || summary !== null || upload !== null || hasProfileInput(profile);
+    messages.length > 0 ||
+    summary !== null ||
+    upload !== null ||
+    hasProfileInput(profile) ||
+    Object.values(extra).some((v) => v !== "") ||
+    live.notices.length > 0;
 
   const info: InfoValues = { ...extra, ...profile };
   // 패널은 사용자가 넣은 정보·서류가 있을 때만 채운다
   const hasAnyInfo = Object.values(info).some((v) => v !== "");
-  const hasAudit = demoAudit || upload !== null;
   // 여러 항목을 이어서 입력할 때는 팝업으로 (한 항목 수정은 입력창 위 작은 카드)
   const startInfo = () => setWelcome({ intro: false, startKey: firstMissing(info), group: "basic" });
   const startExtra = () => setWelcome({ intro: false, startKey: firstMissing(info, "extra"), group: "extra" });
-  const numOrNull = (v: number | "") => (v === "" ? null : v);
-  const benefitCtx: BenefitCtx = {
-    sido: extra.sido,
-    job: extra.job,
-    age: numOrNull(profile.age),
-    incomeManwon: numOrNull(profile.incomeManwon),
-    sepMonths: numOrNull(profile.sepMonths),
-    depositManwon: numOrNull(profile.depositManwon),
-    rentManwon: numOrNull(profile.rentManwon),
-    housing: extra.housing,
-    homeOwner: extra.homeOwner,
-  };
-  // 내 정보 한 항목을 바꾸고 브라우저에 저장한다 (시연 실행이 채운 값은 저장하지 않음)
+  // 내 정보 한 항목을 바꾸고 브라우저에 저장한다
   const setInfo = (key: InfoKey, value: InfoValue) => {
     let nextProfile: ProfileInput = isProfileKey(key)
       ? { ...profile, [key]: value === "" ? "" : Math.max(0, Number(value) || 0) }
@@ -505,16 +452,12 @@ export default function Page() {
     if (working) return;
     setMessages([]);
     setChatId(`c-${Date.now()}`);
-    setTools([]);
     setSummary(null);
     setUpload(null);
-    setDemoAudit(false);
     setProfile(loadSavedInfo().profile);
     setFocusId(null);
     setAskState(null);
-    setCtx("demo");
-    setAnswers({});
-    setDoneDocs({});
+    setCtx("");
     setMarkedTargets({});
     setView("combo");
   };
@@ -539,54 +482,12 @@ export default function Page() {
 
   const scrollDown = () => setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 60);
 
-  const audit =
-    auditMode === "upload" && upload ? upload.result : policy.auditScenarios[auditMode === "fixed" ? "fixed" : "defect"];
-  const auditRisks = risksOf(audit);
-  const formFields = upload?.result.autoFilledFields.length ? upload.result.autoFilledFields : form.autoFilledFields;
-  const requiredDocs = policy.documentRecipes.filter((d) => d.required);
-  const exemptDocs = policy.documentRecipes.filter((d) => !d.required);
-  const forbiddenHit = form.forbiddenWords.filter((w) => essay.includes(w));
-  const keywordHit = form.recommendedKeywords.filter((w) => essay.includes(w));
+  const uploadAudit = upload?.result || null;
+  const uploadRisks = uploadAudit ? risksOf(uploadAudit) : 0;
+  const uploadFields = uploadAudit?.autoFilledFields || [];
 
   const display = (v: string) =>
     maskOnScreen ? v.replace(/(\d{6})-([1-4])\d{6}/g, "$1-$2******") : v;
-
-  const fetchTools = async (
-    p: Profile | ProfileInput = profile,
-    mode: "defect" | "fixed" = auditMode === "fixed" ? "fixed" : "defect",
-    signal?: AbortSignal
-  ) => {
-    const resolved = "age" in p && typeof p.age === "number" ? (p as Profile) : toProfile(p as ProfileInput);
-    setToolsLoading(true);
-    try {
-      const res = await fetch("/api/agent/execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal,
-        body: JSON.stringify({
-          age: resolved.age,
-          region: REGION,
-          monthlyIncomeManwon: resolved.incomeManwon,
-          depositManwon: resolved.depositManwon,
-          monthlyRentManwon: resolved.rentManwon,
-          separateLivingMonths: resolved.sepMonths,
-          auditMode: mode,
-          publicDataApiKey: publicKey,
-          essayText: essay,
-        }),
-      });
-      const data = await res.json();
-      if (data?.tools) {
-        setTools(data.tools);
-        setSummary(data.summary);
-      }
-      return data as { tools?: ToolExecution[]; summary?: Summary };
-    } catch {
-      return {};
-    } finally {
-      setToolsLoading(false);
-    }
-  };
 
   // Gemini 키는 서버(.env.local)에만 둔다. 브라우저는 연결 상태만 확인한다.
   const verifyKey = async () => {
@@ -644,12 +545,6 @@ export default function Page() {
     setLoaded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // 내 정보 입력을 마치면(또는 저장된 정보로 들어오면) 자격 계산을 바로 돌려 판정 탭을 채운다
-  useEffect(() => {
-    if (loaded && !onboard && !welcome && !working && hasProfileInput(profile)) fetchTools();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onboard, welcome, loaded]);
 
   // 실시간 공고: 내 정보가 채워지거나 조건이 바뀌면 온통청년·복지로·보조금24에서 조회한다 (서버 10분 캐시)
   const liveKey = [
@@ -709,35 +604,6 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveKey, hasAnyInfo, liveNonce, loaded, welcome]);
 
-  // 알아서 다시 점검: 내 정보가 바뀌면 받을 수 있는 지원과 판정을 다시 계산해 지난 점검과 비교하고,
-  // 받을 수 있는 공고의 마감이 7일 안이면 알린다 (하루에 한 번). 브라우저 계산만 쓴다.
-  const recheckKey = JSON.stringify(benefitCtx);
-  useEffect(() => {
-    if (!loaded || welcome || !hasAnyInfo) return;
-    const t = window.setTimeout(() => {
-      const verdict = hasProfileInput(profile) ? nearMiss(toProfile(profile)).verdict : undefined;
-      const curr = takeSnapshot(benefitCtx, verdict);
-      const prev = loadLocal<Snapshot | null>("gonggopass_recheck_snapshot", null);
-      const changed = prev ? diffSnapshots(prev, curr, benefitCtx) : [];
-      localStorage.setItem("gonggopass_recheck_snapshot", JSON.stringify(curr));
-
-      const today = new Date().toDateString();
-      const seen = loadLocal<{ day: string; titles: string[] }>("gonggopass_recheck_deadline_seen", { day: today, titles: [] });
-      const seenToday = seen.day === today ? seen.titles : [];
-      const deadlines = upcomingDeadlines(benefitCtx).filter((d) => !seenToday.includes(d.title));
-      if (deadlines.length) {
-        localStorage.setItem(
-          "gonggopass_recheck_deadline_seen",
-          JSON.stringify({ day: today, titles: [...seenToday, ...deadlines.map((d) => d.title)] })
-        );
-      }
-      const items = [...changed, ...deadlines];
-      if (items.length) setRecheck({ items, at: Date.now() });
-    }, 700);
-    return () => window.clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recheckKey, loaded, welcome]);
-
   useEffect(() => {
     if (loaded) localStorage.setItem("gonggopass_policy_state", JSON.stringify(policyState));
   }, [policyState, loaded]);
@@ -785,7 +651,6 @@ export default function Page() {
       setPublicOk(false);
       setPublicMsg("");
     }
-    fetchTools();
   };
 
   const patch = (id: string, m: Partial<Message>) =>
@@ -803,46 +668,6 @@ export default function Page() {
     return id;
   };
 
-  const missionCopy = (key: MissionKey, s: Summary, p: Profile) => {
-    const calc = `보증금 환산 ${won(s.convertedDepositKRW)} + 월세 ${won(p.rentManwon * 10000)} = **${won(s.totalConvertedRentKRW)}** (상한 900,000원)`;
-    const nm = nearMiss(p);
-    const nmTop = nm.items.find((i) => i.kind !== "margin");
-    const triage = `**${VERDICT[s.verdict].title}.** ${VERDICT[s.verdict].body}\n\n- 본인 소득: 1인가구 기준 중위소득의 **${s.medianRatioPercent}%** (요건 60% 이하, 특례 50% 이상)\n- 월세: ${calc}\n- 근거 조항: 3p 제2조 단서, 18p [별표2] 제3호\n- 건축물대장 용도 확인은 예시 데이터입니다.\n\n**한 끗 차이:** ${nm.headline}${nmTop ? ` — ${nmTop.title}` : ""}`;
-    const defect = policy.auditScenarios.defect.findings;
-    return {
-      triage: {
-        user: `만 ${p.age}세이고 부모님과 따로 산 지 ${p.sepMonths}개월 됐습니다. 월 소득 ${p.incomeManwon}만 원, 보증금 ${p.depositManwon.toLocaleString("ko-KR")}만 원에 월세 ${p.rentManwon}만 원입니다. 부모님 소득이 높은 편인데 청년월세 지원 대상인지 확인해 주세요.`,
-        reply: triage,
-        title: "자격 판정 결과",
-        meta: `중위소득 ${s.medianRatioPercent}% · 환산 월세 ${won(s.totalConvertedRentKRW)}`,
-      },
-      recipe: {
-        user: "제 조건에서 어떤 서류를 어떤 옵션으로 발급받아야 하는지 알려 주세요.",
-        reply: `공고문에 나열된 서류 ${policy.allDocumentsCount}종 가운데 이 조건에서 준비할 서류는 **${requiredDocs.length}종**입니다.\n\n- 주민등록등본: 전입일과 최근 5년 주소변동을 **포함**으로 발급\n- 가족관계증명서: 일반이 아닌 **상세** 증명서\n- 임대차계약서: 확정일자가 없으면 **신고필증** 추가\n\n서류별 발급 화면 링크와 선택 옵션은 서류 준비 탭에 정리했습니다.`,
-        title: "서류 발급 가이드",
-        meta: `필수 ${requiredDocs.length}종 · 발급처 링크 포함`,
-      },
-      audit_defect: {
-        user: "등본, 임대차계약서, 가족관계증명서를 준비했습니다. 제출 전에 문제 없는지 봐 주세요.",
-        reply: `예시 서류 세트 A를 점검한 결과 **반려 위험 ${defect.length}건**을 찾았습니다.\n\n${defect.map((f, i) => `${i + 1}. ${f.title.replace(/^\[[^\]]+\]\s*/, "")}`).join("\n")}\n\n항목별 근거 조항과 보완 방법은 제출 탭에 있습니다.`,
-        title: "사전 검수 리포트",
-        meta: `반려 위험 ${defect.length}건`,
-      },
-      audit_fixed: {
-        user: "지적된 항목을 모두 보완해서 다시 올렸습니다. 재검수하고 신청서를 채워 주세요.",
-        reply: `예시 서류 세트 B를 다시 점검했고 **감지된 반려 위험이 없습니다.**\n\n- 신청서 ${form.autoFilledFields.length}개 항목을 서류 값으로 채웠습니다.\n- 계획서 초안: 금칙어 ${forbiddenHit.length}건, 권장 키워드 ${keywordHit.length}/${form.recommendedKeywords.length}개 포함\n\n제출 탭에서 내용을 확인하고 내려받을 수 있습니다.`,
-        title: "신청 패키지",
-        meta: "신청서 자동 기입 · 계획서 초안",
-      },
-      all: {
-        user: "자격 확인부터 서류 검수, 신청서 작성까지 전체 흐름을 한 번에 실행해 주세요.",
-        reply: `${triage}\n\n이어서 서류 선별, 예시 서류 세트 A 검수(**반려 위험 ${defect.length}건**), 신청서 점검까지 실행했습니다. 채팅의 도구 실행 내역에서 도구별 입력과 결과, 데이터 출처를 확인할 수 있습니다.`,
-        title: "전체 실행 내역",
-        meta: "도구 9개 실행",
-      },
-    }[key];
-  };
-
   // 탭을 전환하거나 스크롤해도 AI가 짚어준 빨간 상자 표시를 계속 유지
   useEffect(() => {
     document.querySelectorAll<HTMLElement>("[data-agent-target]").forEach((el) => {
@@ -851,7 +676,7 @@ export default function Page() {
       if (label) el.setAttribute("data-agent-marked", label);
       else el.removeAttribute("data-agent-marked");
     });
-  }, [markedTargets, view, canvasOpen, tools, summary, upload, messages]);
+  }, [markedTargets, view, canvasOpen, summary, upload, messages]);
 
   const clearAgentTimers = () => {
     agentTimersRef.current.forEach((t) => window.clearTimeout(t));
@@ -885,34 +710,6 @@ export default function Page() {
     while (pausedRef.current && !stoppedRef.current) {
       await new Promise((r) => setTimeout(r, 120));
     }
-  };
-
-  const startAgentPlan = (labels: string[], thoughts: string[], scan = false) => {
-    clearAgentTimers();
-    stoppedRef.current = false;
-    pausedRef.current = false;
-    setAgentPaused(false);
-    setAgentActive(true);
-    setAgentScanning(scan);
-    setAgentTarget(null);
-    setMarkedTargets({});
-    setAgentSteps(labels.map((label, i) => ({ label, status: i === 0 ? "active" : "pending" })));
-    setAgentThought(thoughts[0] || "");
-
-    labels.slice(1).forEach((_, idx) => {
-      const stepIndex = idx + 1;
-      const t = window.setTimeout(() => {
-        if (stoppedRef.current) return;
-        setAgentSteps((prev) =>
-          prev.map((s, i) => ({
-            ...s,
-            status: i < stepIndex ? "done" : i === stepIndex ? "active" : "pending",
-          }))
-        );
-        if (thoughts[stepIndex]) setAgentThought(thoughts[stepIndex]);
-      }, stepIndex * 1450);
-      agentTimersRef.current.push(t);
-    });
   };
 
   const finishAgentWithTarget = (
@@ -989,146 +786,6 @@ export default function Page() {
     })();
   };
 
-  const runMission = async (key: MissionKey) => {
-    if (working) return;
-    const m = MISSIONS[key];
-    setCtx("demo");
-    if (m.mode) setAuditMode(m.mode);
-    if (m.mode || key === "all") setDemoAudit(true);
-    const activeProfile = hasProfileInput(profile) ? toProfile(profile) : DEMO_PROFILE;
-    if (!hasProfileInput(profile)) setProfile(DEMO_PROFILE);
-    const s0 = summary;
-    const copy0 = s0 ? missionCopy(key, s0, activeProfile) : null;
-    const id = pushTurn({
-      content: copy0?.user || m.label,
-      demo: true,
-      attachments: key.startsWith("audit")
-        ? ["주민등록등본.pdf", "임대차계약서.jpg", "가족관계증명서.pdf"]
-        : undefined,
-    });
-    pendingMsgIdRef.current = id;
-    setExpanded((e) => ({ ...e, [id]: true }));
-
-    const planConfig: Record<
-      MissionKey,
-      { labels: string[]; thoughts: string[]; scan: boolean; targets: { tab?: View; selector: string; label: string }[] }
-    > = {
-      triage: {
-        labels: ["공고 조건 분석", "소득·월세 환산", "특례 조항 판정"],
-        thoughts: [
-          "신청자 연령과 별도 거주 기간을 공고문 기준으로 대조합니다.",
-          "보증금 연 5.5% 환산액과 월세를 합산해 상한 요건을 계산합니다.",
-          "18p [별표2] 제3호 독립가구 특례 적용 여부를 확정합니다.",
-        ],
-        scan: false,
-        targets: [
-          { tab: "combo", selector: "triage-nearmiss", label: "한 끗 차이 진단" },
-          { tab: "combo", selector: "combo-total", label: "받을 돈 최대 조합" },
-        ],
-      },
-      recipe: {
-        labels: ["판정 조건 대조", "필수 서류 선별", "발급 옵션 정리"],
-        thoughts: [
-          "전체 12종 서류 중 현재 조건에서 면제되는 서류를 제외합니다.",
-          "주민등록등본·가족관계증명서·임대차계약서 필수 4종을 추립니다.",
-          "반려를 막기 위한 발급 체크박스 옵션을 정리합니다.",
-        ],
-        scan: false,
-        targets: [
-          { tab: "recipe", selector: "recipe-docs", label: "필수 발급 서류" },
-          { tab: "recipe", selector: "recipe-exempt", label: "면제 서류 확인" },
-          { tab: "recipe", selector: "recipe-timeline", label: "발급일 역산 캘린더" },
-        ],
-      },
-      audit_defect: {
-        labels: ["서류 3종 스캔", "규칙·발급일 점검", "교차 검증 리포트"],
-        thoughts: [
-          "첨부된 예시 서류 세트 A의 텍스트와 직인 영역을 스캔합니다.",
-          "전입일·상세 증명서·확정일자 등 반려 유발 항목을 검사합니다.",
-          "등본과 임대차계약서의 주소·성명 일치 여부를 교차 검증합니다.",
-        ],
-        scan: true,
-        targets: [
-          { tab: "audit", selector: "audit-risk", label: "반려 위험 적발" },
-          { tab: "audit", selector: "audit-findings", label: "보완 방법 안내" },
-          { tab: "audit", selector: "audit-crosscheck", label: "서류 간 교차 검증" },
-        ],
-      },
-      audit_fixed: {
-        labels: ["보완 서류 재스캔", "신청서 자동 기입", "계획서 금칙어 점검"],
-        thoughts: [
-          "보완된 예시 서류 세트 B를 다시 스캔해 미비점이 없는지 확인합니다.",
-          "검증된 서류 값으로 복지로 신청서 항목을 자동으로 채웁니다.",
-          "계획서 초안의 금칙어와 권장 키워드 포함 여부를 점검합니다.",
-        ],
-        scan: true,
-        targets: [
-          { tab: "audit", selector: "package-form", label: "신청서 자동 기입" },
-          { tab: "audit", selector: "package-essay", label: "계획서 금칙어 점검" },
-          { tab: "audit", selector: "package-files", label: "제출 파일명 규격" },
-          { tab: "audit", selector: "package-aftercare", label: "받은 뒤 환수 방어" },
-        ],
-      },
-      all: {
-        labels: ["자격 요건 계산", "서류 선별", "서류 사전 검수", "신청 패키지 구성"],
-        thoughts: [
-          "입력 조건으로 중위소득 비율과 환산 합산 월세를 계산합니다.",
-          "조건에 맞는 필수 서류 4종과 면제 서류를 분류합니다.",
-          "예시 서류 세트 A를 스캔해 반려 위험 4건을 사전 탐지합니다.",
-          "도구 9개 실행 결과와 출처를 실행 내역 패널에 정리합니다.",
-        ],
-        scan: true,
-        targets: [
-          { tab: "combo", selector: "combo-total", label: "받을 돈 최대 조합" },
-          { tab: "recipe", selector: "recipe-docs", label: "필수 발급 서류" },
-          { tab: "audit", selector: "audit-risk", label: "반려 위험 적발" },
-          { tab: "audit", selector: "package-form", label: "신청서 자동 기입" },
-        ],
-      },
-    };
-
-    const cfg = planConfig[key];
-    startAgentPlan(cfg.labels, cfg.thoughts, cfg.scan);
-    const ac = new AbortController();
-    abortRef.current = ac;
-
-    const minPlanWait = Math.min(cfg.labels.length * 1450, 4400);
-    const [data] = await Promise.all([
-      fetchTools(activeProfile, m.mode ?? (auditMode === "fixed" ? "fixed" : "defect"), ac.signal),
-      new Promise((r) => setTimeout(r, minPlanWait)),
-    ]);
-    await waitWhilePaused();
-
-    if (stoppedRef.current) return;
-    pendingMsgIdRef.current = null;
-
-    if (!data.tools || !data.summary) {
-      patch(id, { content: "도구 실행에 실패했습니다. 서버 상태를 확인한 뒤 다시 시도하세요.", error: true });
-      setAgentActive(false);
-      setAgentScanning(false);
-    } else {
-      const copy = missionCopy(key, data.summary, activeProfile);
-      const next: Record<MissionKey, MissionKey[]> = {
-        triage: ["recipe"],
-        recipe: ["audit_defect"],
-        audit_defect: ["audit_fixed"],
-        audit_fixed: [],
-        all: ["audit_fixed"],
-      };
-      setView(m.view);
-      setCanvasOpen(true);
-      patch(id, {
-        content: copy.reply,
-        traces: data.tools.filter((t) => m.steps.includes(t.step)),
-        artifact: { view: m.view, title: copy.title, meta: copy.meta },
-        followUps: next[key],
-      });
-      finishAgentWithTarget(`${copy.title} 정리 완료 — 강조된 영역을 확인하세요.`, cfg.targets);
-    }
-    setWorking(false);
-    scrollDown();
-  };
-
   const readFiles = (list: FileList | null) =>
     Promise.all(
       Array.from(list || []).map(
@@ -1156,7 +813,7 @@ export default function Page() {
     const el = e.target;
     const files = await readFiles(el.files);
     el.value = "";
-    if (files.length && active) send(undefined, `${active.p.name} 서류를 검수해 주세요.`, files);
+    if (files.length) send(undefined, active ? `${active.p.name} 서류를 검수해 주세요.` : "", files);
   };
   // /api/agent/run SSE 스트리밍 호출: 서버 단계(step)와 Gemini 추론(thought)을 실시간으로 HUD에 반영한다.
   const callRunStream = async (payload: Record<string, unknown>, signal: AbortSignal) => {
@@ -1303,7 +960,6 @@ export default function Page() {
           setPolicyState((s) => ({ ...s, [auditFor.key]: { ...s[auditFor.key], audit: result } }));
         } else {
           setUpload({ result, mode: String(data.mode || "local_rules"), note: data.note ? String(data.note) : undefined });
-          setAuditMode("upload");
         }
         setView("audit");
         setCanvasOpen(true);
@@ -1402,11 +1058,20 @@ export default function Page() {
         setAskState((s) => (s?.status === "waiting" ? null : s));
       }
       if (eligibility) {
-        // 채팅으로 계산한 결과도 패널(자격 판정·한 끗 차이)에 반영한다
         if (data.summary) setSummary(data.summary as Summary);
-        setCtx("demo");
+        if (cardData) {
+          setFocusId(id);
+          const ps: PolicyDetail[] = cardData.policies || [];
+          if (ps.length) {
+            setCtx(`${id}#0`);
+            setFacts((f) => ({
+              ...f,
+              ...Object.fromEntries(ps.map((p) => [p.name.replace(/\s+/g, ""), { ...p, at: Date.now() }])),
+            }));
+          }
+        }
         setView("combo");
-        setCanvasOpen(true);
+        if (window.innerWidth >= 1024) setCanvasOpen(true);
       } else if (cardData) {
         setFocusId(id);
         setView("answer");
@@ -1428,7 +1093,6 @@ export default function Page() {
           setPolicyState((s) => ({ ...s, [auditKey]: { ...s[auditKey], audit: data.auditResult as AuditResult } }));
         } else {
           setUpload({ result: data.auditResult as AuditResult, mode: "gemini" });
-          setAuditMode("upload");
         }
       }
       patch(id, {
@@ -1449,14 +1113,11 @@ export default function Page() {
         plan: (data.plan as PlanStep[] | undefined) || undefined,
         ...(eligibility && {
           artifact: { view: "combo" as View, title: "자격 판정 결과", meta: "입력 조건 기준 계산" },
-          followUps: ["recipe", "audit_defect"] as MissionKey[],
         }),
       });
-      if (eligibility) {
-        finishAgentWithTarget("자격 판정과 발급 서류를 탭별로 정리했습니다.", [
-          { tab: "combo", selector: "triage-nearmiss", label: "한 끗 차이 진단" },
-          { tab: "combo", selector: "combo-total", label: "받을 돈 최대 조합" },
-          { tab: "recipe", selector: "recipe-docs", label: "필수 발급 서류" },
+      if (eligibility && window.innerWidth >= 1024) {
+        finishAgentWithTarget("자격 판정 결과를 정리했습니다.", [
+          { tab: "combo", selector: "triage-calc", label: "소득·월세 계산 결과" },
         ]);
       } else if (cardData && window.innerWidth >= 1024) {
         const hasPolicies = Boolean(cardData.policies && cardData.policies.length > 0);
@@ -1485,34 +1146,28 @@ export default function Page() {
   };
 
   const downloadPackage = () => {
-    const content = [
+    if (!uploadAudit) return;
+    const lines = [
       `[공고패스] 제출 전 점검 요약`,
-      `대상 사업: ${policy.title} (${policy.ministry})`,
-      `점검 서류: ${auditMode === "upload" ? "업로드 서류" : "예시 서류 세트"} · 반려 위험 ${auditRisks}건`,
+      `점검 서류: 업로드 서류 · 반려 위험 ${uploadRisks}건`,
       `※ 사전 점검 결과이며 최종 판정은 접수 기관이 합니다.`,
       ``,
-      `1. 신청서 기입 항목`,
-      ...formFields.map((f) => `- ${f.label}: ${f.value} [출처: ${f.sourceDoc}]`),
-      ``,
-      `2. ${form.essayTitle}`,
-      essay,
-      ``,
-      `3. 제출 파일명`,
-      ...audit.documents.map((d, i) => `${i + 1}. ${d.renamedFileName} (원본: ${d.fileName})`),
-    ].join("\n");
+      ...(uploadFields.length
+        ? [`1. 추출된 기입 항목`, ...uploadFields.map((f) => `- ${f.label}: ${f.value} [출처: ${f.sourceDoc}]`), ``]
+        : []),
+      `제출 파일명`,
+      ...uploadAudit.documents.map((d, i) => `${i + 1}. ${d.renamedFileName} (원본: ${d.fileName})`),
+    ];
+    const content = lines.join("\n");
     const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `공고패스_점검요약_${policy.title.replace(/\s+/g, "_")}.txt`;
+    a.download = "공고패스_서류점검요약.txt";
     a.click();
     URL.revokeObjectURL(url);
     setDownloaded(true);
     setTimeout(() => setDownloaded(false), 3000);
   };
-
-  const quizImpacts = policy.questions.map((q) => q.options.find((o) => o.value === answers[q.id]));
-  const quizDone = quizImpacts.every(Boolean);
-  const quizWarn = quizImpacts.find((o) => o?.ruleImpact === "warning");
 
   const filteredChats = sidebarSearch.trim()
     ? chats.filter((c) => c.title.toLowerCase().includes(sidebarSearch.trim().toLowerCase()))
@@ -1851,21 +1506,60 @@ export default function Page() {
                   </div>
 
                   <div className="mb-4 grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {(["triage", "recipe", "audit_defect", "audit_fixed"] as MissionKey[]).map((k, idx) => (
+                    {[
+                      {
+                        tag: "01",
+                        label: "맞춤 지원금 찾기",
+                        sub: "내 조건에 맞는 실시간 공고와 마감 일정",
+                        onClick: () =>
+                          hasAnyInfo
+                            ? send(undefined, "내 조건에 맞는 청년 정책과 지원 내용, 신청 기간을 정리해 주세요.")
+                            : startInfo(),
+                      },
+                      {
+                        tag: "02",
+                        label: "자격 조건 판독",
+                        sub: "소득·주거 요건과 예외 특례 확인",
+                        onClick: () =>
+                          send(undefined, "내 소득과 거주 조건으로 신청 가능한 주거·생활 지원 자격을 확인해 주세요."),
+                      },
+                      {
+                        tag: "03",
+                        label: "필요 서류 확인",
+                        sub: "공고별 제출 서류와 발급처 정리",
+                        onClick: () => {
+                          if (live.notices.some((n) => n.docs.length > 0)) {
+                            setView("recipe");
+                            setCanvasOpen(true);
+                          } else {
+                            send(undefined, "내 조건에서 신청 가능한 대표 청년 지원금의 필요 서류와 발급처를 알려 주세요.");
+                          }
+                        },
+                      },
+                      {
+                        tag: "04",
+                        label: "서류 사전 검수",
+                        sub: "올린 서류의 누락·발급일·주소 일치 점검",
+                        onClick: () => {
+                          setView("audit");
+                          setCanvasOpen(true);
+                        },
+                      },
+                    ].map((card, idx) => (
                       <button
-                        key={k}
-                        onClick={() => runMission(k)}
+                        key={card.tag}
+                        onClick={card.onClick}
                         disabled={working}
                         style={{ animationDelay: `${420 + idx * 70}ms` }}
                         className="animate-fade-up hover-lift rounded-xl border border-purple-100 bg-white p-3.5 text-left shadow-sm hover:border-purple-300 group disabled:opacity-50"
                       >
                         <div className="mb-2">
                           <span className="tnum inline-block text-[10px] font-semibold text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">
-                            STEP {MISSIONS[k].no}
+                            {card.tag}
                           </span>
                         </div>
-                        <h4 className="text-xs font-semibold text-slate-800 mb-1">{MISSIONS[k].label}</h4>
-                        <p className="text-[11px] text-slate-400 leading-snug">{MISSIONS[k].sub}</p>
+                        <h4 className="text-xs font-semibold text-slate-800 mb-1">{card.label}</h4>
+                        <p className="text-[11px] text-slate-400 leading-snug">{card.sub}</p>
                       </button>
                     ))}
                   </div>
@@ -1886,10 +1580,7 @@ export default function Page() {
                         <div className="max-w-[85%] rounded-2xl rounded-br-md bg-purple-50/90 border border-purple-100 px-4 py-2.5 text-sm leading-relaxed text-slate-800">
                           {msg.content}
                         </div>
-                        <span className="text-[11px] text-slate-400">
-                          {msg.demo && "시연 시나리오 · "}
-                          {msg.time}
-                        </span>
+                        <span className="text-[11px] text-slate-400">{msg.time}</span>
                       </div>
                     ) : (
                       <div
@@ -1912,45 +1603,14 @@ export default function Page() {
                           </div>
                         ) : (
                           <>
-                            {!msg.card && msg.traces && msg.traces.length > 0 && (
-                              <div className="rounded-xl border border-slate-200/90 bg-slate-50/40">
-                                <button
-                                  onClick={() => setExpanded((e) => ({ ...e, [msg.id]: !e[msg.id] }))}
-                                  aria-expanded={Boolean(expanded[msg.id])}
-                                  className="flex w-full items-center justify-between px-3 py-2 text-left text-[13px] text-slate-600 hover:bg-slate-50 rounded-xl"
-                                >
-                                  <span>도구 {msg.traces.length}개 실행</span>
-                                  <ChevronDown
-                                    className={`h-4 w-4 transition-transform ${expanded[msg.id] ? "rotate-180" : ""}`}
-                                  />
-                                </button>
-                                {expanded[msg.id] && (
-                                  <ul className="divide-y divide-slate-100 border-t border-slate-200">
-                                    {msg.traces.map((t) => (
-                                      <li key={t.step} className="flex items-center gap-3 px-3 py-2 text-[13px]">
-                                        <StatusDot status={t.status} />
-                                        <span className="min-w-0 flex-1">
-                                          <span className="block truncate text-slate-800">{t.title}</span>
-                                          <span className="block truncate text-xs text-slate-500">{t.basis}</span>
-                                        </span>
-                                        <SourceBadge source={t.source} />
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
-                              </div>
-                            )}
-
-                            {msg.plan && msg.plan.length > 0 && <PlanLine plan={msg.plan} verified={msg.verification?.passed} />}
-
                             {msg.card ? (
                               <CardView card={msg.card} onAsk={(q) => send(undefined, q)} disabled={working} />
                             ) : (
                               <div
                                 className={`whitespace-pre-wrap text-sm leading-relaxed ${
                                   msg.error
-                                    ? "rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-red-800"
-                                    : "text-slate-800"
+                                    ? "rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-red-800"
+                                    : "rounded-2xl border border-purple-100/90 bg-white px-4 py-3.5 text-slate-800 shadow-sm"
                                 }`}
                               >
                                 <Rich text={msg.content} />
@@ -1970,7 +1630,7 @@ export default function Page() {
                                       setView("answer");
                                       setCanvasOpen(true);
                                     }}
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] text-slate-700 hover:border-brand-600 hover:text-brand-700"
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-white px-2.5 py-1 text-xs font-medium text-purple-700 hover:bg-purple-50"
                                   >
                                     <ListChecks className="h-3.5 w-3.5" />
                                     제출 체크리스트 {msg.checklist.items.length}단계
@@ -1983,7 +1643,7 @@ export default function Page() {
                                       setView("answer");
                                       setCanvasOpen(true);
                                     }}
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] text-slate-700 hover:border-brand-600 hover:text-brand-700"
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-white px-2.5 py-1 text-xs font-medium text-purple-700 hover:bg-purple-50"
                                   >
                                     <FileText className="h-3.5 w-3.5" />
                                     {msg.draft.title} 초안
@@ -1992,74 +1652,13 @@ export default function Page() {
                               </div>
                             )}
 
-                            {msg.card && (
-                              <button
-                                onClick={() => {
-                                  setFocusId(msg.id);
-                                  if (msg.card?.policies?.length) setCtx(`${msg.id}#0`);
-                                  setView("answer");
-                                  setCanvasOpen(true);
-                                }}
-                                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-brand-700"
-                              >
-                                <PanelRight className="h-3.5 w-3.5" />
-                                근거 보기 · 도구 {msg.traces?.length || 0}건 · 출처 {msg.sources?.length || 0}곳
-                              </button>
-                            )}
-
-                            {msg.verification && <VerifyBadge v={msg.verification} />}
-
-                            {msg.reasoning && (
-                              <div
-                                title={`${msg.reasoning.by === "ai" ? "AI가" : "규칙으로"} 질문 난이도를 판단해 고른 추론 수준`}
-                                className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500"
-                              >
-                                <span
-                                  className={`rounded px-1.5 py-0.5 font-medium ${
-                                    msg.reasoning.level === "high" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"
-                                  }`}
-                                >
-                                  {msg.reasoning.level === "high" ? "깊게 생각함" : "기본 추론"}
-                                </span>
-                                <span>{msg.reasoning.reason}</span>
-                              </div>
-                            )}
-
-                            {!msg.card && msg.sources && msg.sources.length > 0 && (
-                              <details className="group">
-                                <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-slate-500 hover:text-slate-800">
-                                  출처 {msg.sources.length}곳
-                                  {msg.sources.some((s) => s.registered) && " · 내 도구 포함"}
-                                  <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
-                                </summary>
-                                <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                                  {msg.sources.map((s) => (
-                                    <li key={s.url}>
-                                      <a
-                                        href={s.url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className={`inline-flex max-w-[16rem] items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-slate-50 ${
-                                          s.registered ? "border-brand-600/40 text-brand-700" : "border-slate-200 text-slate-600"
-                                        }`}
-                                      >
-                                        <span className="truncate">{s.title}</span>
-                                        {s.registered && <span className="shrink-0 font-medium">· 내 도구</span>}
-                                        <ExternalLink className="h-3 w-3 shrink-0" />
-                                      </a>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </details>
-                            )}
-
-                            {msg.artifact && (
+                            {!msg.card && msg.artifact && (
                               <button
                                 onClick={() => {
                                   setView(toView(msg.artifact!.view));
                                   setCanvasOpen(true);
                                 }}
-                                className="group flex w-full items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5 text-left transition-colors hover:border-purple-300 hover:bg-purple-50/40"
+                                className="group flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left transition-colors hover:border-purple-300 hover:bg-purple-50/40"
                               >
                                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-purple-100/70 text-purple-700">
                                   <FileText className="h-4 w-4" />
@@ -2072,21 +1671,27 @@ export default function Page() {
                               </button>
                             )}
 
-                            {msg.followUps && msg.followUps.length > 0 && (
-                              <div className="flex flex-wrap gap-2">
-                                {msg.followUps.map((k) => (
-                                  <button
-                                    key={k}
-                                    onClick={() => runMission(k)}
-                                    disabled={working}
-                                    className="flex items-center gap-1.5 rounded-xl border border-purple-200 bg-purple-50/50 px-3 py-1.5 text-[13px] font-medium text-purple-700 transition-colors hover:bg-purple-100 active:translate-y-px disabled:opacity-50"
-                                  >
-                                    다음: {MISSIONS[k].label}
-                                    <ArrowRight className="h-3.5 w-3.5" />
-                                  </button>
-                                ))}
-                              </div>
-                            )}
+                            <AnswerMeta
+                              msg={msg}
+                              open={Boolean(expanded[msg.id])}
+                              sourcesOpen={Boolean(expanded[`${msg.id}:src`])}
+                              onToggle={() => setExpanded((e) => ({ ...e, [msg.id]: !e[msg.id] }))}
+                              onToggleSources={() => setExpanded((e) => ({ ...e, [`${msg.id}:src`]: !e[`${msg.id}:src`] }))}
+                              onOpenArtifact={
+                                msg.card && msg.artifact
+                                  ? () => {
+                                      setView(toView(msg.artifact!.view));
+                                      setCanvasOpen(true);
+                                    }
+                                  : undefined
+                              }
+                              onOpenPanel={() => {
+                                setFocusId(msg.id);
+                                if (msg.card?.policies?.length) setCtx(`${msg.id}#0`);
+                                setView("answer");
+                                setCanvasOpen(true);
+                              }}
+                            />
                           </>
                         )}
                       </div>
@@ -2100,18 +1705,6 @@ export default function Page() {
 
           {/* 입력창을 화면 맨 아래에 붙인다 (아래 안내 문구 줄은 뺐다) */}
           <div className="shrink-0 px-6 md:px-8 pb-4 max-w-3xl mx-auto w-full space-y-3">
-            {recheck && (
-              <RecheckCard
-                items={recheck.items}
-                at={recheck.at}
-                onOpen={() => {
-                  setCtx("demo");
-                  setView("combo");
-                  setCanvasOpen(true);
-                }}
-                onClose={() => setRecheck(null)}
-              />
-            )}
             {infoCard}
             {promptCard}
           </div>
@@ -2209,16 +1802,16 @@ export default function Page() {
               <label className="flex items-center gap-2 text-xs text-slate-500">
                 <span className="shrink-0">기준 정책</span>
                 <select
-                  value={active ? active.key : "demo"}
-                  onChange={(e) => (e.target.value === "demo" ? setCtx("demo") : choosePolicy(e.target.value))}
+                  value={active ? active.key : ""}
+                  onChange={(e) => (e.target.value === "" ? setCtx("") : choosePolicy(e.target.value))}
                   className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 shadow-sm hover:border-purple-200 focus:border-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-200"
                 >
+                  <option value="">내 조건 맞춤 실시간 공고</option>
                   {policyOptions.map((o) => (
                     <option key={o.key} value={o.key}>
                       {o.p.name}
                     </option>
                   ))}
-                  <option value="demo">청년월세 지원 (시연 시나리오)</option>
                 </select>
               </label>
             )}
@@ -2248,11 +1841,11 @@ export default function Page() {
                 />
               ) : (
                 <Card>
-                  <Empty text="채팅 답변의 '근거 보기'를 누르면 여기에 표시됩니다." />
+                  <Empty text="채팅 답변의 '근거·출처'를 누르면 여기에 표시됩니다." />
                 </Card>
               ))}
 
-            {/* 받을 돈: 위는 기준 정책의 자격 확인, 아래는 내 정보로 본 전체 지원 조합 */}
+            {/* 받을 돈: 기준 정책을 골랐으면 그 정책의 조건 판독, 아니면 실시간 맞춤 공고 */}
             {active && view === "combo" && (
               <>
                 <PolicyTriage p={active.p} st={pst} onChange={setPst} onAsk={(q) => send(undefined, q)} busy={working} />
@@ -2267,236 +1860,133 @@ export default function Page() {
                     sepMonths: profile.sepMonths === "" ? null : profile.sepMonths,
                   }}
                 />
-                <div className="px-1 pt-2 text-xs font-medium text-slate-500">전체 지원 · 내 정보 기준 (기준 정책과 별개로 계산)</div>
               </>
             )}
-            {view === "combo" && !hasAnyInfo && (
-              <EmptyCta text="내 정보를 입력하면 받을 수 있는 지원과 최대 조합을 계산해 드려요." action="내 정보 입력하기" onClick={startInfo} />
-            )}
-            {/* 한 끗 차이 진단 (자격 판정 탭에서 옮겨 옴) */}
-            {/* 한 끗 차이 진단은 청년월세 규칙 기준이라 시연 시나리오일 때만 */}
-            {view === "combo" && !active && hasProfileInput(profile) && <NearMissCard profile={toProfile(profile)} />}
-            {view === "combo" && hasAnyInfo && (
-              <BenefitCombo
-                ctx={benefitCtx}
-                sigungu={extra.sigungu}
-                onNeed={(k) => setOnboard({ startKey: k, single: true })}
-                onAsk={(q) => send(undefined, q)}
-                busy={working}
-              />
-            )}
-
-            {/* 발급 가이드: 자격 판정 뒤에만 */}
-            {view === "recipe" && !active && !summary && (
-              <EmptyCta text="내 정보를 입력하면 필요한 서류와 발급 일정이 여기에 표시됩니다." action="내 정보 입력하기" onClick={startInfo} />
-            )}
-            {view === "recipe" && !active && summary && (
-              <>
-                <Card target="recipe-docs">
-                  <CardHead
-                    title={`준비할 서류 ${requiredDocs.length}종`}
-                    desc={`발급 완료 ${requiredDocs.filter((d) => doneDocs[d.id]).length} / ${requiredDocs.length}`}
-                  />
-                  <ul className="divide-y divide-slate-100">
-                    {requiredDocs.map((d) => (
-                      <li key={d.id} className="p-4">
-                        <div className="flex items-start gap-3">
-                          <input
-                            type="checkbox"
-                            aria-label={`${d.title} 발급 완료`}
-                            checked={Boolean(doneDocs[d.id])}
-                            onChange={() => setDoneDocs((s) => ({ ...s, [d.id]: !s[d.id] }))}
-                            className="mt-1 h-4 w-4 accent-brand-600"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <div>
-                                <div className={`text-sm font-medium ${doneDocs[d.id] ? "text-slate-400 line-through" : ""}`}>
-                                  {d.title}
-                                </div>
-                                <div className="text-xs text-slate-500">
-                                  {d.issuer} · {d.timeEstimate}
-                                </div>
-                              </div>
-                              <a
-                                href={d.issuerUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white hover:border-purple-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                              >
-                                발급처 열기 <ExternalLink className="h-3 w-3" />
-                              </a>
-                            </div>
-                            <ul className="mt-3 space-y-2">
-                              {d.checkboxOptions.map((c) => (
-                                <li key={c.label} className="flex gap-2 text-[13px]">
-                                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-600" strokeWidth={2.5} />
-                                  <span>
-                                    {c.label}
-                                    <span className="block text-xs text-slate-500">{c.reason}</span>
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </Card>
-
-                <DocCalendar docs={requiredDocs} policyTitle={policy.title} />
-
-                <Card target="recipe-exempt">
-                  <CardHead title="이 조건에서는 내지 않아도 되는 서류" />
-                  <ul className="divide-y divide-slate-100">
-                    {exemptDocs.map((d) => (
-                      <li key={d.id} className="px-4 py-3 text-[13px]">
-                        <div className="text-slate-500 line-through">{d.title}</div>
-                        <div className="mt-0.5 text-xs text-slate-500">{d.eliminatedReason?.replace(/\s*\(자동 소거\)/, "")}</div>
-                      </li>
-                    ))}
-                  </ul>
-                </Card>
-              </>
-            )}
-
-            {/* 제출 = 사전 검수 + 신청 패키지. 서류를 올렸거나 시연을 실행했을 때만 */}
-            {view === "audit" && !active && !hasAudit && (
-              <EmptyCta text="채팅 입력창의 클립 버튼으로 서류를 첨부하면 검수 결과와 신청 패키지가 여기에 표시됩니다." />
-            )}
-            {view === "audit" && !active && hasAudit && (
-              <>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100/80 p-1 text-[13px]">
-                    {(
-                      [
-                        ...(demoAudit
-                          ? [
-                              ["defect", "예시 세트 A (미비)"],
-                              ["fixed", "예시 세트 B (보완)"],
-                            ]
-                          : []),
-                        ...(upload ? [["upload", "내 업로드"]] : []),
-                      ] as [AuditMode, string][]
-                    ).map(([m, label]) => (
-                      <button
-                        key={m}
-                        onClick={() => setAuditMode(m)}
-                        aria-pressed={auditMode === m}
-                        className={`rounded-lg px-2.5 py-1 transition-all ${
-                          auditMode === m ? "bg-white text-purple-700 shadow-sm ring-1 ring-slate-200/70" : "text-slate-600 hover:text-slate-900"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
+            {view === "combo" && !active && summary && (
+              <Card target="triage-calc">
+                <CardHead
+                  title="청년월세 자격 계산 결과"
+                  desc="입력값 기반 실계산 · 최종 판정은 접수 기관이 합니다"
+                  action={<SourceBadge source="calc" />}
+                />
+                <div className="space-y-3 p-4">
+                  <div className={`rounded-xl border px-3.5 py-2.5 text-[13px] ${VERDICT[summary.verdict].cls}`}>
+                    <div className="font-semibold">{VERDICT[summary.verdict].title}</div>
+                    <div className="mt-0.5 text-xs opacity-90">{VERDICT[summary.verdict].body}</div>
                   </div>
-                  {auditMode === "upload" && upload ? (
-                    <span className="text-xs text-slate-500">
-                      검수 방식: {upload.mode === "gemini" ? "AI 판독" : "규칙 엔진"}
-                    </span>
-                  ) : (
-                    <SourceBadge source="sample" />
-                  )}
+                  <div className="grid grid-cols-2 gap-3 text-[13px]">
+                    <div className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2">
+                      <div className="text-xs text-slate-500">1인가구 중위소득 대비</div>
+                      <div className="tnum mt-0.5 font-semibold text-slate-900">{summary.medianRatioPercent}%</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2">
+                      <div className="text-xs text-slate-500">환산 합산 월세</div>
+                      <div className="tnum mt-0.5 font-semibold text-slate-900">{won(summary.totalConvertedRentKRW)}</div>
+                    </div>
+                  </div>
                 </div>
+              </Card>
+            )}
+            {view === "combo" && !active && !hasAnyInfo && !summary && (
+              <EmptyCta text="내 정보를 입력하면 조건에 맞는 실시간 공고와 자격을 찾아 드려요." action="내 정보 입력하기" onClick={startInfo} />
+            )}
+            {view === "combo" && !active && hasAnyInfo && (
+              <LiveBenefitsPanel live={live} onAsk={(q) => send(undefined, q)} onRefresh={refreshLive} busy={working} />
+            )}
 
-                <AuditReport audit={audit} display={display} />
-
-                {auditMode === "defect" && (
-                  <button
-                    onClick={() => runMission("audit_fixed")}
-                    disabled={working}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white hover:border-purple-200 px-3 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    보완 서류(세트 B)로 재검수 <ArrowRight className="h-3.5 w-3.5" />
-                  </button>
+            {/* 서류 준비 */}
+            {view === "recipe" && !active && (
+              <>
+                <LiveDocsPanel notices={live.notices} onAsk={(q) => send(undefined, q)} busy={working} />
+                {!live.notices.some((n) => n.docs.length > 0) && (
+                  <EmptyCta
+                    text={
+                      hasAnyInfo
+                        ? "채팅에서 정책을 물어보거나 공고문을 첨부하면 필요한 서류와 발급 방법이 여기에 정리됩니다."
+                        : "내 정보를 입력하거나 채팅에서 정책을 물어보면 필요한 서류가 여기에 정리됩니다."
+                    }
+                    action={!hasAnyInfo ? "내 정보 입력하기" : undefined}
+                    onClick={!hasAnyInfo ? startInfo : undefined}
+                  />
                 )}
               </>
             )}
 
-            {/* 신청 패키지: 검수 결과 바로 아래에 이어서 */}
-            {view === "audit" && !active && hasAudit && (
+            {/* 제출 = 업로드 서류 검수 및 정리 */}
+            {view === "audit" && !active && !uploadAudit && (
+              <Card>
+                <CardHead
+                  title="제출 전 서류 검수"
+                  desc="등본·계약서·가족관계증명서 등 서류를 올리면 누락, 발급일, 성명·주소 일치를 점검합니다."
+                  action={
+                    <label
+                      className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700 ${working ? "pointer-events-none opacity-60" : ""}`}
+                    >
+                      <Paperclip className="h-3.5 w-3.5" />
+                      서류 올리기
+                      <input type="file" multiple accept=".pdf,image/*,.txt" onChange={uploadForPolicy} disabled={working} className="sr-only" />
+                    </label>
+                  }
+                />
+                <div className="space-y-2 px-4 pb-4 text-xs leading-relaxed text-slate-500">
+                  <p>채팅 입력창의 클립 버튼으로 공고문을 먼저 올리거나 정책을 고르면 그 공고 기준으로 검수합니다.</p>
+                  <p className="rounded-lg bg-amber-50/70 px-3 py-2 text-amber-900">
+                    실제 개인정보가 포함된 신분증·계약서 대신 가상·샘플 서류(예: <code className="font-mono">public/sample-docs</code>)를 사용해 주세요. 텍스트(.txt)는 주민번호·연락처·계좌를 가린 뒤 전송합니다.
+                  </p>
+                </div>
+              </Card>
+            )}
+            {view === "audit" && !active && uploadAudit && upload && (
               <>
-                <div className="flex items-center gap-2 pt-2 text-xs font-semibold text-slate-500">
-                  <span>신청 패키지</span>
-                  <span className="h-px flex-1 bg-slate-200" />
-                  {auditRisks > 0 && <span className="font-medium text-amber-700">반려 위험 {auditRisks}건 보완 후 제출</span>}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label
+                    className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-purple-200 hover:bg-slate-50 ${working ? "pointer-events-none opacity-60" : ""}`}
+                  >
+                    <Paperclip className="h-3.5 w-3.5" />
+                    서류 다시 올리기
+                    <input type="file" multiple accept=".pdf,image/*,.txt" onChange={uploadForPolicy} disabled={working} className="sr-only" />
+                  </label>
+                  <span className="text-xs text-slate-500">
+                    검수 방식: {upload.mode === "gemini" ? "AI 판독" : "규칙 엔진"}
+                  </span>
                 </div>
 
-                <Card target="package-form">
-                  <CardHead
-                    title="신청서 자동 기입"
-                    desc={form.formTitle}
-                    action={
-                      <a
-                        href="https://www.bokjiro.go.kr"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white hover:border-purple-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                      >
-                        복지로 <ExternalLink className="h-3 w-3" />
-                      </a>
-                    }
-                  />
-                  <dl className="divide-y divide-slate-100">
-                    {formFields.map((f) => (
-                      <div key={f.label} className="px-4 py-2.5 text-[13px]">
-                        <dt className="text-xs text-slate-500">{f.label}</dt>
-                        <dd className="mt-0.5">{display(f.value)}</dd>
-                        <dd className="mt-0.5 text-xs text-slate-400">출처: {f.sourceDoc}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </Card>
+                <AuditReport audit={uploadAudit} display={display} />
 
-                <Card target="package-essay">
-                  <CardHead title="계획서 초안" desc={form.essayTitle} />
-                  <div className="space-y-3 p-4">
-                    <textarea
-                      value={essay}
-                      onChange={(e) => setEssay(e.target.value)}
-                      rows={9}
-                      aria-label="계획서 초안"
-                      className="block w-full rounded-xl border border-slate-200 bg-white p-3 transition-shadow text-[13px] leading-relaxed focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/15"
-                    />
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-600">
-                      <span className="tnum">{essay.length.toLocaleString("ko-KR")}자</span>
-                      <span className={forbiddenHit.length ? "font-medium text-red-700" : ""}>
-                        금칙어 {forbiddenHit.length ? `${forbiddenHit.length}건: ${forbiddenHit.join(", ")}` : "없음"}
-                      </span>
-                      <span>
-                        권장 키워드 {keywordHit.length} / {form.recommendedKeywords.length}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {form.recommendedKeywords.map((k) => (
-                        <span
-                          key={k}
-                          className={`rounded px-1.5 py-0.5 text-xs ${
-                            essay.includes(k) ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
-                          }`}
-                        >
-                          {k}
-                        </span>
+                <div className="flex items-center gap-2 pt-2 text-xs font-semibold text-slate-500">
+                  <span>검수 정리</span>
+                  <span className="h-px flex-1 bg-slate-200" />
+                  {uploadRisks > 0 && <span className="font-medium text-amber-700">반려 위험 {uploadRisks}건 보완 후 제출</span>}
+                </div>
+
+                {uploadFields.length > 0 && (
+                  <Card target="package-form">
+                    <CardHead title="서류에서 읽은 항목" desc="올린 서류에서 추출한 값" />
+                    <dl className="divide-y divide-slate-100">
+                      {uploadFields.map((f) => (
+                        <div key={f.label} className="px-4 py-2.5 text-[13px]">
+                          <dt className="text-xs text-slate-500">{f.label}</dt>
+                          <dd className="mt-0.5">{display(f.value)}</dd>
+                          <dd className="mt-0.5 text-xs text-slate-400">출처: {f.sourceDoc}</dd>
+                        </div>
                       ))}
-                    </div>
-                  </div>
-                </Card>
+                    </dl>
+                  </Card>
+                )}
 
-                <Card target="package-files">
-                  <CardHead title="제출 파일명" desc="공고문 규격에 맞춘 이름" />
-                  <ul className="divide-y divide-slate-100">
-                    {audit.documents.map((d) => (
-                      <li key={d.docId} className="px-4 py-2.5 text-[13px]">
-                        <div className="font-mono text-xs">{d.renamedFileName}</div>
-                        <div className="text-xs text-slate-400">원본: {d.fileName}</div>
-                      </li>
-                    ))}
-                  </ul>
-                </Card>
-
-                <AfterCare profile={hasProfileInput(profile) ? toProfile(profile) : null} policyTitle={policy.title} />
+                {uploadAudit.documents.length > 0 && (
+                  <Card target="package-files">
+                    <CardHead title="제출 파일명" desc="제출용으로 정리한 파일 이름" />
+                    <ul className="divide-y divide-slate-100">
+                      {uploadAudit.documents.map((d) => (
+                        <li key={d.docId} className="px-4 py-2.5 text-[13px]">
+                          <div className="font-mono text-xs">{d.renamedFileName}</div>
+                          <div className="text-xs text-slate-400">원본: {d.fileName}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  </Card>
+                )}
 
                 <button
                   onClick={downloadPackage}
@@ -2957,73 +2447,78 @@ function AskCard({
 
 function CardView({ card, onAsk, disabled }: { card: AnswerCard; onAsk: (q: string) => void; disabled: boolean }) {
   return (
-    <div className="space-y-3">
-      <p className="text-[15px] font-semibold leading-snug text-slate-900">{card.summary}</p>
+    <>
+      <div className="space-y-3.5 rounded-2xl border border-purple-100/90 bg-white p-4 shadow-sm">
+        <p className="text-[15px] font-semibold leading-snug text-slate-900">{card.summary}</p>
 
-      {card.facts.length > 0 && (
-        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200">
-          {card.facts.map((f) => (
-            <div key={f.label} className="bg-white px-3 py-2">
-              <dt className="text-xs text-slate-500">{f.label}</dt>
-              <dd className="tnum mt-0.5 text-sm font-medium text-slate-900">{f.value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
+        {card.facts.length > 0 && (
+          <dl className="grid grid-cols-2 gap-2">
+            {card.facts.map((f) => (
+              <div key={f.label} className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2">
+                <dt className="text-[11px] text-slate-500">{f.label}</dt>
+                <dd className="tnum mt-0.5 text-[13px] font-medium leading-snug text-slate-900">{f.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
 
-      {card.steps.length > 0 && (
-        <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2 text-[13px] text-slate-700">
-          {card.steps.map((st, i) => (
-            <li key={i} className="flex items-center gap-1.5">
-              {i > 0 && <ArrowRight className="h-3 w-3 text-slate-300" aria-hidden />}
-              <span className="grid h-5 w-5 place-items-center rounded-full bg-brand-50 text-[11px] font-semibold text-brand-700">
-                {i + 1}
-              </span>
-              {st}
-            </li>
-          ))}
-        </ol>
-      )}
+        {card.steps.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-semibold text-slate-400">진행 순서</p>
+            <ol className="space-y-1.5 text-[13px] leading-snug text-slate-700">
+              {card.steps.map((st, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand-50 text-[11px] font-semibold text-brand-700">
+                    {i + 1}
+                  </span>
+                  <span>{st}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
 
-      {card.caution && (
-        <p className="flex items-start gap-1.5 text-[13px] text-amber-800">
-          <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {card.caution}
-        </p>
-      )}
+        {card.caution && (
+          <p className="flex items-start gap-2 rounded-xl bg-amber-50/75 px-3 py-2 text-xs leading-relaxed text-amber-900">
+            <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" />
+            <span>{card.caution}</span>
+          </p>
+        )}
 
-      {card.links.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {card.links.map((l) => (
-            <a
-              key={l.url}
-              href={l.url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 shadow-sm shadow-purple-500/20 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-700"
-            >
-              {l.name}
-              <ExternalLink className="h-3.5 w-3.5" />
-            </a>
-          ))}
-        </div>
-      )}
+        {card.links.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-slate-100 pt-2.5 text-xs">
+            <span className="font-medium text-slate-400">바로가기</span>
+            {card.links.map((l) => (
+              <a
+                key={l.url}
+                href={l.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-medium text-purple-700 hover:underline"
+              >
+                {l.name}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
 
       {card.followUps.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
+        <div className="flex flex-wrap gap-1.5">
           {card.followUps.map((q) => (
             <button
               key={q}
               onClick={() => onAsk(q)}
               disabled={disabled}
-              className="rounded-full border border-slate-300 px-3 py-1 text-[13px] text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+              className="rounded-full border border-purple-100 bg-white/80 px-3 py-1 text-xs text-slate-600 transition-colors hover:border-purple-300 hover:text-purple-700 disabled:opacity-50"
             >
               {q}
             </button>
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -4116,63 +3611,6 @@ function ResizeHandle({
   );
 }
 
-// 알아서 다시 점검한 결과 카드 (내 정보 변경·마감 임박)
-function RecheckCard({
-  items,
-  at,
-  onOpen,
-  onClose,
-}: {
-  items: RecheckItem[];
-  at: number;
-  onOpen: () => void;
-  onClose: () => void;
-}) {
-  const style: Record<RecheckItem["kind"], { mark: string; cls: string }> = {
-    new: { mark: "+", cls: "bg-emerald-100 text-emerald-700" },
-    lost: { mark: "−", cls: "bg-red-100 text-red-700" },
-    verdict: { mark: "⇄", cls: "bg-purple-100 text-purple-700" },
-    deadline: { mark: "!", cls: "bg-amber-100 text-amber-800" },
-  };
-  const time = new Date(at).toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit" });
-  return (
-    <div className="animate-fade-up rounded-2xl border border-purple-200/80 bg-white px-4 py-3 shadow-[0_10px_28px_-18px_rgba(109,40,217,0.3)]">
-      <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-700">
-          <RefreshCw className="h-3.5 w-3.5" />
-          공고패스가 다시 점검했어요
-          <span className="font-normal text-slate-400">{time}</span>
-        </span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="닫기"
-          className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      <ul className="mt-2 space-y-1.5">
-        {items.slice(0, 5).map((it, i) => (
-          <li key={i} className="flex items-start gap-2 text-[13px]">
-            <span className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full text-[11px] font-bold ${style[it.kind].cls}`}>
-              {style[it.kind].mark}
-            </span>
-            <span className="min-w-0">
-              <span className="text-slate-800">{it.title}</span>
-              {it.detail && <span className="block text-xs text-slate-500">{it.detail}</span>}
-            </span>
-          </li>
-        ))}
-        {items.length > 5 && <li className="text-xs text-slate-400">외 {items.length - 5}건</li>}
-      </ul>
-      <button type="button" onClick={onOpen} className="mt-2 text-xs font-medium text-purple-700 hover:underline">
-        받을 돈 탭에서 자세히 보기 →
-      </button>
-    </div>
-  );
-}
-
 // AI가 처음 세운 계획과 실행 결과: "AI 계획 ① 자격 계산 ✓ → ② 웹 검색 ✓ → ③ 답변 정리 ✓ → 검증 ✓"
 function PlanLine({ plan, verified }: { plan: PlanStep[]; verified?: boolean }) {
   const circled = "①②③④⑤⑥⑦⑧";
@@ -4198,34 +3636,179 @@ function PlanLine({ plan, verified }: { plan: PlanStep[]; verified?: boolean }) 
   );
 }
 
-// 답변 검증 결과: 통과/경고 한 줄 + 펼치면 검사 항목별 결과
-function VerifyBadge({ v }: { v: Verification }) {
-  const passed = v.checks.filter((c) => c.ok).length;
-  const failed = v.checks.filter((c) => !c.ok);
+// 답변 아래 한 줄 메타 바: 검증 상태·추론 수준·근거·출처를 접어 두고 누를 때만 펼친다
+function AnswerMeta({
+  msg,
+  open,
+  sourcesOpen,
+  onToggle,
+  onToggleSources,
+  onOpenPanel,
+  onOpenArtifact,
+}: {
+  msg: Message;
+  open: boolean;
+  sourcesOpen: boolean;
+  onToggle: () => void;
+  onToggleSources: () => void;
+  onOpenPanel: () => void;
+  onOpenArtifact?: () => void;
+}) {
+  const v = msg.verification;
+  const passed = v ? v.checks.filter((c) => c.ok).length : 0;
+  const failed = v ? v.checks.filter((c) => !c.ok).length : 0;
+  const hasDrawer = Boolean(v || msg.plan?.length || msg.reasoning || (!msg.card && msg.traces?.length));
+  const hasSourcesInline = Boolean(!msg.card && msg.sources?.length);
+  if (!hasDrawer && !hasSourcesInline && !msg.card && !onOpenArtifact) return null;
+
   return (
-    <details className="group text-xs">
-      <summary
-        className={`inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full px-2.5 py-1 font-medium ring-1 ${
-          v.passed ? "bg-purple-50 text-purple-700 ring-purple-200" : "bg-amber-50 text-amber-800 ring-amber-200"
-        }`}
-      >
-        {v.passed ? <Check className="h-3.5 w-3.5" strokeWidth={2.5} /> : <CircleAlert className="h-3.5 w-3.5" />}
-        {v.passed ? `답변 검증 통과 ${passed}/${v.checks.length}` : `검증 경고 ${failed.length}건 · 원문을 꼭 확인하세요`}
-        {v.retried && <span className="font-normal opacity-80">· 1회 고쳐 씀</span>}
-        <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
-      </summary>
-      <ul className="mt-2 space-y-1 rounded-xl border border-slate-200 bg-white p-3">
-        {v.checks.map((c) => (
-          <li key={c.name} className="flex gap-2">
-            <span className={`shrink-0 font-medium ${c.ok ? "text-purple-600" : c.severity === "fix" ? "text-amber-700" : "text-slate-500"}`}>
-              {c.ok ? "✓" : "!"} {c.name}
+    <div className="space-y-2 pt-0.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+        {hasDrawer && (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            className={`inline-flex items-center gap-1 transition-colors ${
+              v && !v.passed
+                ? "rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100"
+                : v
+                ? "font-medium text-purple-600 hover:text-purple-800"
+                : "hover:text-slate-700"
+            }`}
+          >
+            {v ? (
+              v.passed ? (
+                <Check className="h-3 w-3" strokeWidth={2.5} />
+              ) : (
+                <CircleAlert className="h-3 w-3" />
+              )
+            ) : null}
+            <span>
+              {v
+                ? v.passed
+                  ? `검증 ${passed}/${v.checks.length}`
+                  : `검증 경고 ${failed}건 · 원문 확인`
+                : msg.plan?.length
+                ? "실행 과정"
+                : !msg.card && msg.traces?.length
+                ? `도구 ${msg.traces.length}건`
+                : "추론 정보"}
             </span>
-            <span className="text-slate-500">{c.note}</span>
-          </li>
-        ))}
-        <li className="pt-1 text-[11px] text-slate-400">도구 계산 결과 · 오늘 날짜 · 공식 도메인과 서버에서 대조했어요.</li>
-      </ul>
-    </details>
+            <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+          </button>
+        )}
+
+        {msg.reasoning && (
+          <span
+            title={`${msg.reasoning.by === "ai" ? "AI가" : "규칙으로"} 질문 난이도를 판단: ${msg.reasoning.reason}`}
+            className="text-slate-400"
+          >
+            {msg.reasoning.level === "high" ? "깊게 추론" : "기본 추론"}
+          </span>
+        )}
+
+        {msg.card && (
+          <button
+            type="button"
+            onClick={onOpenPanel}
+            className="inline-flex items-center gap-1 text-slate-500 transition-colors hover:text-purple-700"
+          >
+            <PanelRight className="h-3 w-3" />
+            근거·출처{(msg.sources?.length || 0) > 0 ? ` (${msg.sources!.length})` : ""}
+          </button>
+        )}
+
+        {onOpenArtifact && (
+          <button
+            type="button"
+            onClick={onOpenArtifact}
+            className="inline-flex items-center gap-1 font-medium text-purple-600 transition-colors hover:text-purple-800 hover:underline"
+          >
+            <FileText className="h-3 w-3" />
+            {msg.artifact?.title || "자격 판정 결과"}
+          </button>
+        )}
+
+        {hasSourcesInline && (
+          <button
+            type="button"
+            onClick={onToggleSources}
+            aria-expanded={sourcesOpen}
+            className="inline-flex items-center gap-1 text-slate-500 transition-colors hover:text-slate-800"
+          >
+            출처 {msg.sources!.length}곳
+            <ChevronDown className={`h-3 w-3 transition-transform ${sourcesOpen ? "rotate-180" : ""}`} />
+          </button>
+        )}
+      </div>
+
+      {open && hasDrawer && (
+        <div className="space-y-2.5 rounded-xl border border-slate-200/80 bg-white/90 p-3 text-xs">
+          {msg.plan && msg.plan.length > 0 && <PlanLine plan={msg.plan} verified={v?.passed} />}
+          {msg.reasoning && (
+            <div className="text-slate-500">
+              <span className="font-medium text-slate-700">
+                {msg.reasoning.level === "high" ? "깊게 추론" : "기본 추론"}
+              </span>{" "}
+              · {msg.reasoning.reason}
+            </div>
+          )}
+          {v && (
+            <ul className="space-y-1 border-t border-slate-100 pt-2">
+              {v.checks.map((c) => (
+                <li key={c.name} className="flex gap-2">
+                  <span
+                    className={`shrink-0 font-medium ${
+                      c.ok ? "text-purple-600" : c.severity === "fix" ? "text-amber-700" : "text-slate-500"
+                    }`}
+                  >
+                    {c.ok ? "✓" : "!"} {c.name}
+                  </span>
+                  <span className="text-slate-500">{c.note}</span>
+                </li>
+              ))}
+              {v.retried && <li className="text-[11px] text-slate-400">검증 기준에 맞춰 답변을 1회 보완했습니다.</li>}
+            </ul>
+          )}
+          {!msg.card && msg.traces && msg.traces.length > 0 && (
+            <ul className="divide-y divide-slate-100 border-t border-slate-100 pt-1">
+              {msg.traces.map((t) => (
+                <li key={t.step} className="flex items-center gap-3 py-1.5">
+                  <StatusDot status={t.status} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-slate-800">{t.title}</span>
+                    <span className="block truncate text-[11px] text-slate-500">{t.basis}</span>
+                  </span>
+                  <SourceBadge source={t.source} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {sourcesOpen && hasSourcesInline && (
+        <ul className="flex flex-wrap gap-1.5">
+          {msg.sources!.map((s) => (
+            <li key={s.url}>
+              <a
+                href={s.url}
+                target="_blank"
+                rel="noreferrer"
+                className={`inline-flex max-w-[16rem] items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-slate-50 ${
+                  s.registered ? "border-brand-600/40 text-brand-700" : "border-slate-200 text-slate-600"
+                }`}
+              >
+                <span className="truncate">{s.title}</span>
+                {s.registered && <span className="shrink-0 font-medium">· 내 도구</span>}
+                <ExternalLink className="h-3 w-3 shrink-0" />
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

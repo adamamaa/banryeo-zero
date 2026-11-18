@@ -1,12 +1,12 @@
-// 알아서 다시 점검: 내 정보가 바뀌거나 마감이 다가오면 자격·받을 수 있는 지원을 다시 계산해 바뀐 점을 알려 준다.
+// 알아서 다시 점검: 실시간 추천 공고나 내 조건이 바뀌면 새로 맞춘 공고와 7일 이내 마감을 알려 준다.
 // Gemini를 부르지 않고 브라우저에서 규칙으로만 계산한다 (비용 없음).
-import { BENEFITS, type BenefitCtx } from "./benefits";
+import type { Gov24Notice } from "./gov24";
 
 export type Verdict = "eligible" | "needs_parent_check" | "ineligible";
 
 export interface Snapshot {
-  eligible: string[]; // 받을 수 있는 정책 id
-  verdict?: Verdict; // 청년월세(시연 공고) 자격 판정
+  noticeIds: string[]; // 실시간 추천 공고 id (source:id)
+  verdict?: Verdict; // 월세 거주자일 때만 청년월세 판정 추적
   at: number;
 }
 
@@ -23,30 +23,40 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 };
 
 const shortName = (name: string) => name.replace(/\s*\(.*\)$/, "");
+const noticeId = (n: Gov24Notice) => `${n.source || "gov24"}:${n.id}`;
 
-export function takeSnapshot(ctx: BenefitCtx, verdict?: Verdict): Snapshot {
+export function takeSnapshot(notices: Gov24Notice[], verdict?: Verdict): Snapshot {
   return {
-    eligible: BENEFITS.filter((b) => b.check(ctx).status === "ok").map((b) => b.id),
+    noticeIds: notices.map(noticeId),
     verdict,
     at: Date.now(),
   };
 }
 
-// 이전 점검과 비교해 새로 받을 수 있게 된 것, 빠진 것, 판정이 바뀐 것을 찾는다
-export function diffSnapshots(prev: Snapshot, curr: Snapshot, ctx: BenefitCtx): RecheckItem[] {
+// 이전 점검과 비교해 새로 맞춘 실시간 공고, 판정 변동을 찾는다
+export function diffSnapshots(prev: Snapshot, curr: Snapshot, notices: Gov24Notice[]): RecheckItem[] {
   const items: RecheckItem[] = [];
-  for (const id of curr.eligible.filter((x) => !prev.eligible.includes(x))) {
-    const b = BENEFITS.find((x) => x.id === id);
-    if (b) items.push({ kind: "new", title: `새로 받을 수 있어요: ${shortName(b.name)}`, detail: b.amountText });
-  }
-  for (const id of prev.eligible.filter((x) => !curr.eligible.includes(x))) {
-    const b = BENEFITS.find((x) => x.id === id);
-    if (b) items.push({ kind: "lost", title: `대상에서 빠졌어요: ${shortName(b.name)}`, detail: b.check(ctx).reason });
+  if (Array.isArray(prev.noticeIds)) {
+    const prevSet = new Set(prev.noticeIds);
+    const added = notices.filter((n) => !prevSet.has(noticeId(n)));
+    for (const n of added.slice(0, 2)) {
+      items.push({
+        kind: "new",
+        title: `새로 맞는 실시간 공고: ${shortName(n.name)}`,
+        detail: [n.org, n.deadlineText].filter(Boolean).join(" · "),
+      });
+    }
+    if (added.length > 2) {
+      items.push({
+        kind: "new",
+        title: `외 ${added.length - 2}건의 실시간 공고가 조건에 새로 맞아요`,
+      });
+    }
   }
   if (prev.verdict && curr.verdict && prev.verdict !== curr.verdict) {
     items.push({
       kind: "verdict",
-      title: `청년월세 판정이 바뀌었어요: ${VERDICT_LABEL[prev.verdict]} → ${VERDICT_LABEL[curr.verdict]}`,
+      title: `청년월세 모의 판정이 바뀌었어요: ${VERDICT_LABEL[prev.verdict]} → ${VERDICT_LABEL[curr.verdict]}`,
     });
   }
   return items;
@@ -54,21 +64,24 @@ export function diffSnapshots(prev: Snapshot, curr: Snapshot, ctx: BenefitCtx): 
 
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
-// 받을 수 있는 정책 중 접수 중이고 마감이 days일 안에 남은 것
-export function upcomingDeadlines(ctx: BenefitCtx, today = new Date(), days = 7): RecheckItem[] {
+// 실시간 공고 중 접수 중이고 마감이 days일 안에 남은 것
+export function upcomingDeadlines(notices: Gov24Notice[], today = new Date(), days = 7): RecheckItem[] {
   const t = startOfDay(today);
-  return BENEFITS.filter((b) => b.applyEnd && b.check(ctx).status === "ok")
-    .map((b) => {
-      const end = new Date(`${b.applyEnd}T00:00:00`);
-      const start = b.applyStart ? new Date(`${b.applyStart}T00:00:00`) : null;
+  return notices
+    .filter((n) => n.applyEnd)
+    .map((n) => {
+      const end = new Date(`${n.applyEnd}T00:00:00`);
+      const start = n.applyStart ? new Date(`${n.applyStart}T00:00:00`) : null;
+      if (Number.isNaN(end.getTime())) return null;
       const left = Math.round((end.getTime() - t.getTime()) / 86400000);
-      return { b, left, open: !start || start <= t };
+      const open = !start || Number.isNaN(start.getTime()) || start <= t;
+      return { n, left, open };
     })
-    .filter((x) => x.open && x.left >= 0 && x.left <= days)
+    .filter((x): x is { n: Gov24Notice; left: number; open: boolean } => Boolean(x && x.open && x.left >= 0 && x.left <= days))
     .sort((a, b) => a.left - b.left)
-    .map(({ b, left }) => ({
+    .map(({ n, left }) => ({
       kind: "deadline" as const,
-      title: `마감 ${left === 0 ? "오늘" : `D-${left}`}: ${shortName(b.name)}`,
-      detail: b.docs.length ? `필요 서류 ${b.docs.length}종을 미리 준비하세요.` : "신청처에서 바로 신청할 수 있어요.",
+      title: `마감 ${left === 0 ? "오늘" : `D-${left}`}: ${shortName(n.name)}`,
+      detail: n.docs.length ? `필요 서류 ${n.docs.length}종을 미리 준비하세요.` : "신청처에서 일정을 확인하세요.",
     }));
 }
