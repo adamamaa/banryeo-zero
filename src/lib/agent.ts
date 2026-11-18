@@ -1,7 +1,7 @@
 // 도구 호출 에이전트 루프.
 // AI(Gemini)가 질문을 보고 어떤 도구를 쓸지 스스로 고르고, 서버가 실행한 결과를 다시 AI에 돌려준다.
 // 검색(google_search)은 Gemini 서버에서 실행되고, 나머지 도구는 이 파일에서 실행한다.
-import { callGemini, geminiError, groundSources, maskPii, type WebSource } from "./gemini";
+import { callGemini, geminiError, groundSources, koreanThought, maskPii, type WebSource } from "./gemini";
 import { judgeConditions, type ConditionField, type EligibilitySummary, type MyValues, type PolicyCondition } from "./eligibility";
 import { fetchGov24Services, type ToolExecution } from "./tools";
 import type { AuditResult } from "./docRules";
@@ -946,7 +946,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         const items = (Array.isArray(args.items) ? args.items : [])
           .map((x: Record<string, unknown>) => ({
             // 화면이 번호를 붙이므로 AI가 붙인 "1." 같은 번호는 뗀다
-            task: String(x?.task || "").replace(/^s*d+s*[.)]s*/, "").slice(0, 60),
+            task: String(x?.task || "").replace(/^\s*\d+\s*[.)]\s*/, "").slice(0, 60),
             detail: x?.detail ? String(x.detail).slice(0, 120) : undefined,
           }))
           .filter((x: { task: string }) => x.task)
@@ -1008,7 +1008,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
 
     contents.push({ role: "user", parts: responses });
     // 다음 차례를 기다리는 동안에도 진행 상태를 갱신한다 (남은 계획 단계 또는 '답변 정리'가 회전)
-    show(thought.slice(-140) || "도구 결과를 바탕으로 다음 단계를 진행하고 있습니다.");
+    show(koreanThought(thought) || "도구 결과를 바탕으로 다음 단계를 진행하고 있습니다.");
   }
   return { ok: false, error: "도구 호출 횟수 제한을 넘었습니다.", traces };
 }

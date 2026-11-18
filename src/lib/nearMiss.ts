@@ -36,6 +36,12 @@ export interface GenericNearMissItem {
 }
 type LimitLike = { field: "age" | "income" | "medianRatio" | "sepMonths" | "deposit" | "rent"; min?: number; max?: number; label: string };
 
+// 받침이 있으면 "을", 없으면 "를"
+const withObject = (word: string) => {
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  return word + (code >= 0 && code <= 11171 && code % 28 ? "을" : "를");
+};
+
 export function limitNearMiss(
   limits: LimitLike[],
   p: Partial<Record<keyof NearMissInput, number | null>>,
@@ -72,7 +78,7 @@ export function limitNearMiss(
           isMoney ? { kind: "fix", area, title: `월 소득이 ${won(over)} 줄면 충족`, detail }
           : l.field === "age" ? { kind: "fail", area, title: `만 ${l.max}세까지만 대상 (지금 만 ${raw}세)`, detail }
           : l.field === "sepMonths" ? { kind: "fail", area, title: `${l.max}개월 이하만 대상 (지금 ${raw}개월)`, detail }
-          : { kind: "fix", area, title: `${area}을 ${(over).toLocaleString("ko-KR")}만 원 낮추면 충족`, detail }
+          : { kind: "fix", area, title: `${withObject(area)} ${over.toLocaleString("ko-KR")}만 원 낮추면 충족`, detail }
         );
       } else if (max === v) {
         items.push({ kind: "risk", area, title: "상한에 딱 맞아요 · 조금만 올라도 탈락", detail });

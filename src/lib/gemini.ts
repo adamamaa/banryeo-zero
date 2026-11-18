@@ -100,6 +100,16 @@ export async function geminiParse(res: Response): Promise<{ text: string; source
 
 export const geminiText = async (res: Response) => (await geminiParse(res)).text;
 
+// 모델의 생각 요약은 영어로 올 때가 많다. 화면에는 한국어 문장만 보여 주고, 아니면 빈 문자열을 돌려준다.
+export function koreanThought(text: string, max = 140): string {
+  const full = text.replace(/\s+/g, " ").trim();
+  // 잘린 앞 단어는 버린다
+  const t = full.length > max ? full.slice(-max).replace(/^\S*\s/, "") : full;
+  const ko = (t.match(/[가-힣]/g) || []).length;
+  const en = (t.match(/[A-Za-z]/g) || []).length;
+  return ko >= 8 && ko >= en ? t : "";
+}
+
 // 답변을 JSON으로 받으면 Gemini가 검색 출처를 돌려주지 않는다. 답변의 핵심을 글로 다시 확인해 출처를 받는다.
 export async function groundSources(apiKey: string, question: string, answer: string): Promise<WebSource[]> {
   try {

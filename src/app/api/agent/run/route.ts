@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callGemini, streamGemini, geminiText, geminiParse, geminiError, isFatalGeminiStatus, maskPii, GEMINI_MODEL, chooseReasoning, type Reasoning } from "@/lib/gemini";
+import { callGemini, streamGemini, geminiText, geminiParse, geminiError, isFatalGeminiStatus, koreanThought, maskPii, GEMINI_MODEL, chooseReasoning, type Reasoning } from "@/lib/gemini";
 import type { AuditResult } from "@/lib/docRules";
 import { fetchGov24Services, subsidyKeyword, type ToolExecution } from "@/lib/tools";
 import { CARD_FORMAT, parseCard, parsePolicy, cardToText, type PolicyDetail } from "@/lib/card";
@@ -357,7 +357,7 @@ export async function POST(req: NextRequest) {
               generationConfig: { responseMimeType: "application/json", temperature: 0, thinkingConfig: { thinkingLevel: "high" } },
             },
             (t) => {
-              const snippet = t.replace(/\s+/g, " ").trim().slice(-140);
+              const snippet = koreanThought(t);
               if (snippet) emit?.("thought", { text: snippet });
             },
             req.signal
@@ -726,7 +726,7 @@ ${CARD_FORMAT}`,
                 key,
                 bodyWithTools,
                 (t) => {
-                  const snippet = t.replace(/\s+/g, " ").trim().slice(-140);
+                  const snippet = koreanThought(t);
                   if (snippet) emit?.("thought", { text: snippet });
                 },
                 req.signal

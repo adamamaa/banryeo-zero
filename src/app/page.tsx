@@ -462,11 +462,27 @@ export default function Page() {
     setMarkedTargets({});
     setView("combo");
   };
+  // 답변의 기준 정책: 서류 검수 결과가 있는 정책을 먼저 고른다
+  const policyKeyOf = (m: Message) => {
+    const policies = m.card?.policies || [];
+    if (!policies.length) return null;
+    const i = policies.findIndex((_, n) => policyState[`${m.id}#${n}`]?.audit);
+    return `${m.id}#${Math.max(i, 0)}`;
+  };
+  const focusAnswer = (m: Message) => {
+    setFocusId(m.id);
+    const key = policyKeyOf(m);
+    if (key) setCtx(key);
+  };
   const openChat = (id: string) => {
     const c = chats.find((x) => x.id === id);
     if (!c || working) return;
     setMessages(c.messages);
     setChatId(id);
+    // 다시 열어도 패널이 그 대화의 정책과 검수 결과를 보여 주게 한다
+    const last = [...c.messages].reverse().find((m) => m.card?.policies?.length);
+    setCtx(last ? policyKeyOf(last) || "demo" : "demo");
+    setFocusId(last?.id ?? null);
   };
   const deleteChat = (id: string) => {
     setChats((prev) => prev.filter((c) => c.id !== id));
@@ -1111,9 +1127,13 @@ export default function Page() {
       }
       // 에이전트가 서류 대조 도구를 썼으면 그 결과를 해당 정책의 '사전 검수' 탭에 넣는다
       if (data.auditResult) {
-        const auditKey = cardData?.policies?.length ? `${id}#0` : null;
+        // 검수한 정책과 같은 이름의 정책에 붙인다 (없으면 첫 정책)
+        const auditName = (data.auditPolicy as PolicyDetail | undefined)?.name;
+        const auditIndex = Math.max(0, (cardData?.policies || []).findIndex((p) => p.name === auditName));
+        const auditKey = cardData?.policies?.length ? `${id}#${auditIndex}` : null;
         if (auditKey) {
           setPolicyState((s) => ({ ...s, [auditKey]: { ...s[auditKey], audit: data.auditResult as AuditResult } }));
+          setCtx(auditKey);
         } else {
           setUpload({ result: data.auditResult as AuditResult, mode: "gemini" });
         }
@@ -1668,7 +1688,7 @@ export default function Page() {
                                 {msg.checklist && (
                                   <button
                                     onClick={() => {
-                                      setFocusId(msg.id);
+                                      focusAnswer(msg);
                                       setView("answer");
                                       setCanvasOpen(true);
                                     }}
@@ -1681,7 +1701,7 @@ export default function Page() {
                                 {msg.draft && (
                                   <button
                                     onClick={() => {
-                                      setFocusId(msg.id);
+                                      focusAnswer(msg);
                                       setView("answer");
                                       setCanvasOpen(true);
                                     }}
@@ -1728,8 +1748,7 @@ export default function Page() {
                                   : undefined
                               }
                               onOpenPanel={() => {
-                                setFocusId(msg.id);
-                                if (msg.card?.policies?.length) setCtx(`${msg.id}#0`);
+                                focusAnswer(msg);
                                 setView("answer");
                                 setCanvasOpen(true);
                               }}
@@ -3457,7 +3476,7 @@ function PolicyAudit({
         <AuditReport audit={st.audit} display={display} />
       ) : (
         <Card>
-          <Empty text="아직 검수한 서류가 없습니다. 서류를 올리면 결과가 여기에 표시됩니다." />
+          <Empty text={busy ? "AI가 작업 중입니다. 서류 검수를 요청했다면 끝나는 대로 여기에 표시됩니다." : "아직 검수한 서류가 없습니다. 서류를 올리면 결과가 여기에 표시됩니다."} />
         </Card>
       )}
     </>
