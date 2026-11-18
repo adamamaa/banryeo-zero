@@ -1026,6 +1026,13 @@ export default function Page() {
                   sido: extra.sido || undefined,
                   job: extra.job || undefined,
                   housing: extra.housing || undefined,
+                  // 대안 찾기에서 실시간 공고를 내 조건으로 거를 때 쓰는 값
+                  marriage: extra.marriage || undefined,
+                  children: extra.children || undefined,
+                  education: extra.education || undefined,
+                  company: extra.company || undefined,
+                  special: extra.special ? extra.special.split(",") : [],
+                  interests: extra.interests ? extra.interests.split(",") : [],
                   // 추가 조건 (혼인·자녀·학력·병역·우대 조건 등)을 "항목: 값" 문장으로
                   more: extraSummary(info),
                 }
@@ -2460,6 +2467,49 @@ function CardView({ card, onAsk, disabled }: { card: AnswerCard; onAsk: (q: stri
               </div>
             ))}
           </dl>
+        )}
+
+        {/* 안 될 때 AI가 실시간 공고에서 찾아 온 다른 길 */}
+        {(card.alternatives?.length ?? 0) > 0 && (
+          <div className="space-y-2 rounded-xl border border-purple-100 bg-purple-50/50 p-3">
+            <p className="text-xs font-semibold text-purple-800">대신 받을 수 있는 지원</p>
+            <ul className="space-y-2">
+              {card.alternatives!.map((a) => (
+                <li key={a.ref || a.name} className="rounded-lg bg-white px-3 py-2.5 ring-1 ring-purple-100">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="text-[13px] font-semibold leading-snug text-slate-900">{a.name}</span>
+                    {a.source && (
+                      <span className="rounded bg-purple-100 px-1.5 py-px text-[10px] font-medium text-purple-700">{a.source}</span>
+                    )}
+                  </div>
+                  {a.benefit && <p className="mt-1 text-xs leading-relaxed text-slate-600">{a.benefit}</p>}
+                  {a.why && <p className="mt-0.5 text-xs leading-relaxed text-purple-700">{a.why}</p>}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                    {a.deadline && <span>{a.deadline}</span>}
+                    {a.org && <span className="min-w-0 truncate">{a.org}</span>}
+                    <button
+                      type="button"
+                      onClick={() => onAsk(`${a.name} 내 조건으로 받을 수 있는지와 신청 방법 알려줘`)}
+                      disabled={disabled}
+                      className="font-medium text-purple-700 hover:underline disabled:opacity-50"
+                    >
+                      자세히 묻기
+                    </button>
+                    {a.url && (
+                      <a
+                        href={a.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-0.5 font-medium text-purple-700 hover:underline"
+                      >
+                        신청처 <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
 
         {card.steps.length > 0 && (

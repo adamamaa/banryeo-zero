@@ -146,6 +146,64 @@ const SIDO_FULL: Record<string, string[]> = {
 // 같은 조건은 10분 동안 다시 부르지 않는다 (호출 한도 아끼기)
 const cache = new Map<string, { at: number; data: Gov24Notice[] }>();
 
+// 소관기관으로 내 지역 사업인지 가른다
+function regionOf(q: { sido?: string; sigungu?: string }) {
+  const org = (r: Row) => s(r["소관기관명"]);
+  const sidoPrefixes = q.sido ? SIDO_FULL[q.sido] || [q.sido] : [];
+  const inMySido = (o: string) => !sidoPrefixes.length || sidoPrefixes.some((p) => o.startsWith(p));
+  const isRegionalOrg = (o: string) => sidoPrefixes.some((p) => o === p);
+  const isLocalGov = (r: Row) =>
+    s(r["소관기관유형"]).includes("지방") ||
+    /^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|전북|전남|경상|경북|경남|제주)/.test(org(r));
+  const isCentral = (r: Row) =>
+    s(r["소관기관유형"]).includes("중앙") ||
+    (!isLocalGov(r) && (/중앙|부$|처$|청$|위원회$|공단$|공사$|원$/.test(org(r)) || org(r).length > 0));
+  const isMine = (r: Row) => Boolean(q.sigungu) && inMySido(org(r)) && org(r).includes(q.sigungu!);
+  return { org, inMySido, isRegionalOrg, isCentral, isMine };
+}
+
+// 청년이 대상이 아니거나, 내 조건에 없는 특정 집단 전용인 서비스
+const NOT_YOUTH = /노인|어르신|경로당|영유아|아동|초등|중학생|고등학생|산모|임산부/;
+const GROUP_ONLY: [RegExp, string[]][] = [
+  [/장애/, ["장애인"]],
+  [/한부모/, ["한부모 가정"]],
+  [/다문화/, ["다문화 가정"]],
+  [/기초생활|수급자|차상위|저소득/, ["기초생활수급", "차상위계층"]],
+  [/국가유공|보훈/, ["국가유공자 가족"]],
+];
+
+// 대안 찾기: 서비스명 키워드 검색 → 내 시군구·시도·중앙부처 사업만 남긴다
+export async function searchGov24(
+  key: string,
+  q: { sido?: string; sigungu?: string; special?: string[] },
+  keywords: string[]
+): Promise<Gov24Notice[]> {
+  const results = await Promise.allSettled(
+    keywords.map((kw) => call("serviceList", key, { perPage: "30", "cond[서비스명::LIKE]": kw }))
+  );
+  if (results.every((r) => r.status === "rejected")) throw new Error("보조금24 검색 실패");
+  const { org, isRegionalOrg, isCentral, isMine } = regionOf(q);
+  const mine = q.special || [];
+  const rank = (r: Row) => (isMine(r) ? 0 : isRegionalOrg(org(r)) ? 1 : 2);
+  const today = todayYmd();
+  const seen = new Set<string>();
+  return results
+    .flatMap((r) => (r.status === "fulfilled" ? r.value : []))
+    .filter((r) => {
+      const id = s(r["서비스ID"]);
+      const name = s(r["서비스명"]);
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      if (NOT_YOUTH.test(name)) return false;
+      if (GROUP_ONLY.some(([re, need]) => re.test(name) && !need.some((n) => mine.includes(n)))) return false;
+      return !q.sido || isCentral(r) || isRegionalOrg(org(r)) || isMine(r);
+    })
+    .sort((a, b) => rank(a) - rank(b))
+    .map((r) => toNotice(r))
+    .filter((n) => n.id && n.name && (!n.applyEnd || n.applyEnd >= today))
+    .slice(0, 6);
+}
+
 export async function recommendGov24(
   key: string,
   q: { sido?: string; sigungu?: string; interests?: string[] },
@@ -168,25 +226,15 @@ export async function recommendGov24(
     )
   ).flat();
 
-  const org = (r: Row) => s(r["소관기관명"]);
-  const sidoPrefixes = q.sido ? SIDO_FULL[q.sido] || [q.sido] : [];
-  const inMySido = (o: string) => !sidoPrefixes.length || sidoPrefixes.some((p) => o.startsWith(p));
-  const isRegionalOrg = (o: string) => sidoPrefixes.some((p) => o === p);
-  const isLocalGov = (r: Row) =>
-    s(r["소관기관유형"]).includes("지방") ||
-    /^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|전북|전남|경상|경북|경남|제주)/.test(org(r));
-  const isCentral = (r: Row) =>
-    s(r["소관기관유형"]).includes("중앙") ||
-    (!isLocalGov(r) && (/중앙|부$|처$|청$|위원회$|공단$|공사$|원$/.test(org(r)) || org(r).length > 0));
+  const { org, isRegionalOrg, isCentral, isMine } = regionOf(q);
 
   // 순위: 내 시군구 기관 → 내 시도 기관 → 관심 분야(내 지역·중앙 청년 대상) → 중앙부처 청년 서비스
-  const local = q.sigungu ? youthRows.filter((r) => inMySido(org(r)) && org(r).includes(q.sigungu!)) : [];
+  const local = q.sigungu ? youthRows.filter(isMine) : [];
   const regional = q.sido ? youthRows.filter((r) => isRegionalOrg(org(r)) && !local.includes(r)) : [];
   const interest = interestRows.filter((r) => {
     if (!/청년|19세|34세|39세/.test(`${s(r["서비스명"])} ${s(r["지원대상"])}`)) return false;
     if (!q.sido) return true;
-    const o = org(r);
-    return isCentral(r) || isRegionalOrg(o) || (Boolean(q.sigungu) && inMySido(o) && o.includes(q.sigungu!));
+    return isCentral(r) || isRegionalOrg(org(r)) || isMine(r);
   });
   const central = youthRows.filter(isCentral);
 

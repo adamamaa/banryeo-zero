@@ -7,6 +7,7 @@ import { fetchGov24Services, type ToolExecution } from "./tools";
 import type { AuditResult } from "./docRules";
 import type { PolicyDetail } from "./card";
 import { verifyAnswer, type Verification } from "./verify";
+import { findAlternatives, type AltCandidate, type AltProfile } from "./alternatives";
 
 export interface EligibilitySummary {
   medianRatioPercent: number;
@@ -56,6 +57,9 @@ export interface AgentInput {
   signal?: AbortSignal;
   // 링크 검증에서 공식 사이트로 인정할 등록 사이트 도메인
   hosts?: string[];
+  // 대안 찾기에 쓰는 온통청년 키와 내 정보
+  yk?: string;
+  profile?: AltProfile;
 }
 
 export type AgentOutput =
@@ -71,16 +75,18 @@ export type AgentOutput =
       checklist?: AgentChecklist;
       verification?: Verification;
       plan?: PlanStep[];
+      alternatives?: AltCandidate[];
     }
   | { ok: false; error: string; traces: ToolExecution[] };
 
-// 계획 세우기 차례가 하나 늘어서 8번까지
-const MAX_TURNS = 8;
+// 계획 세우기와 대안 찾기 차례까지 넉넉히
+const MAX_TURNS = 9;
 
 const PLAN_TOOLS = [
   "google_search",
   "calculate_eligibility",
   "lookup_subsidy_list",
+  "find_alternatives",
   "audit_documents",
   "create_draft",
   "create_checklist",
@@ -198,6 +204,31 @@ const DECLARATIONS = [
     },
   },
   {
+    name: "find_alternatives",
+    description:
+      "사용자가 원하는 지원이 자격 미달·제외·마감 등으로 안 될 때, 같은 목적을 이룰 다른 지원을 온통청년·복지로·보조금24 실시간 공고에서 찾는다. 사용자의 지역·나이·취업 상태 등에 맞지 않는 공고는 서버가 걸러서 돌려준다.",
+    parameters: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "사용자가 실제로 이루려는 목적 (예: 어학시험 응시료 부담 줄이기, 30자 이내)" },
+        blockedPolicy: { type: "string", description: "안 되는 지원 이름. 결과에서 뺀다" },
+        reason: { type: "string", description: "안 되는 이유 (30자 이내)" },
+        keywords: {
+          type: "array",
+          items: { type: "string" },
+          description: "공고 이름에 들어갈 짧은 검색어 2~4개 (예: 응시료, 어학, 자격증, 평생교육). 문장이 아니라 단어로",
+        },
+        special: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "대화에서 사용자가 밝힌 해당 조건: 기초생활수급, 차상위계층, 한부모 가정, 장애인, 자립준비청년, 다문화 가정, 국가유공자 가족 중에서",
+        },
+      },
+      required: ["goal", "keywords"],
+    },
+  },
+  {
     name: "ask_user",
     description:
       "자격 판정이나 서류 검수에 꼭 필요한 정보가 없을 때 사용자에게 한 가지를 되묻는다. 이 도구를 부르면 대화가 사용자 답을 기다린다. 검색으로 알 수 있는 것은 묻지 않는다.",
@@ -228,6 +259,9 @@ const AGENT_RULES = `
 - 도구 결과의 수치를 그대로 쓰고, 도구 결과와 검색 결과가 다르면 둘 다 밝히세요.
 - 검수에서 끝내지 말고 실행까지 이어 주세요: audit_documents를 썼다면 create_checklist로 제출 직전 체크리스트를 만들고, 보완에 설명이 필요하면(주소 불일치, 서류 지연 등) create_draft로 소명서·사유서 초안을 쓰세요.
 - 사용자가 사유서·자기소개서·계획서 작성을 원하면 create_draft, 신청 준비·제출 방법을 물으면 create_checklist를 쓰세요.
+- 안 된다는 결론(자격 미달, 대상 제외, 마감, 예산 소진)에서 멈추지 마세요. 왜 안 되는지 밝히고, 사용자가 진짜 이루려던 목적을 정한 뒤 find_alternatives를 호출하세요. 전국 제도까지 확인이 필요하면 google_search도 쓰세요.
+- 대안은 사용자 조건에 맞는 것만 alternatives에 최대 3개 넣으세요. find_alternatives 결과는 ref를 그대로 쓰고, 조건이 확실하지 않으면 why에 확인할 점을 쓰세요. 없는 공고를 지어내지 마세요.
+- 대안을 찾았다면 summary에 "안 되는 이유 + 대신 쓸 수 있는 길"을 함께 쓰세요. 찾아봐도 없으면 찾지 못했다고 밝히고 확인할 곳을 안내하세요.
 - 도구를 다 쓴 뒤에는 위에서 정한 JSON 형식으로만 최종 답을 출력하세요.`;
 
 const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : Number(v));
@@ -245,6 +279,9 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
   let checklist: AgentChecklist | undefined;
   // 답변 검증에서 고칠 점이 나오면 한 번만 다시 쓰게 한다
   let verifyRetried = false;
+  // 대안 찾기 결과 (여러 번 찾으면 합친다)
+  let altSearched = false;
+  const alternatives: AltCandidate[] = [];
   // AI가 처음에 세운 계획. 도구를 실행할 때마다 해당 단계를 체크한다
   let plan: PlanStep[] = [];
   const markPlan = (tool: string) => {
@@ -353,7 +390,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
 
       // 답변 검증: 수치·판정은 도구 결과와, 날짜는 오늘과, 링크는 공식 도메인과 대조한다
       show("답변의 수치·판정·날짜·링크를 도구 결과와 대조하고 있습니다.", "verify");
-      const checks = verifyAnswer(text, { summary, hosts: input.hosts });
+      const checks = verifyAnswer(text, { summary, hosts: input.hosts, alternativesSearched: altSearched, alternatives });
       const fixes = checks.filter((c) => !c.ok && c.severity === "fix");
       const passedCount = checks.filter((c) => c.ok).length;
       const verifyTrace = (title: string, status: "done" | "warn") =>
@@ -378,7 +415,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           role: "user",
           parts: [
             {
-              text: `[답변 검증 결과] 아래 문제를 고쳐 같은 JSON 형식으로 최종 답을 다시 출력하세요. 도구 결과의 수치와 판정을 그대로 쓰세요.\n${fixes
+              text: `[답변 검증 결과] 아래 문제를 고쳐 같은 JSON 형식으로 최종 답을 다시 출력하세요. 필요한 도구가 있으면 먼저 쓰세요. 도구 결과의 수치와 판정을 그대로 쓰세요.\n${fixes
                 .map((f) => `- ${f.name}: ${f.note}`)
                 .join("\n")}`,
             },
@@ -408,6 +445,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         checklist,
         verification,
         plan: plan.length ? plan.map((x) => ({ ...x })) : undefined,
+        alternatives,
       };
     }
 
@@ -441,6 +479,53 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         });
         show(`계획: ${plan.map((x) => x.label).join(" → ")}`);
         response = { saved: true, note: "계획을 저장했습니다. 이제 계획 순서대로 도구를 실행하세요." };
+      } else if (name === "find_alternatives") {
+        const goal = String(args.goal || "").slice(0, 40);
+        const blocked = String(args.blockedPolicy || "").slice(0, 40);
+        const keywords = strs(args.keywords, 4).map((k) => k.trim().slice(0, 15)).filter(Boolean);
+        step("find_alternatives", `대안 찾기: ${goal || keywords[0] || "다른 지원"}`);
+        show(`${blocked ? `'${blocked}' 대신 ` : ""}${goal || "같은 목적"}에 쓸 수 있는 지원을 실시간 공고에서 찾고 있습니다.`);
+        if (!keywords.length) {
+          response = { error: "검색어가 없습니다. 공고 이름에 들어갈 단어를 keywords에 넣으세요." };
+        } else {
+          const profile: AltProfile = {
+            ...input.profile,
+            special: Array.from(new Set([...(input.profile?.special || []), ...strs(args.special)])),
+          };
+          try {
+            const found = await findAlternatives({ pk: input.pk, yk: input.yk }, profile, { keywords, exclude: blocked });
+            altSearched = true;
+            for (const c of found.candidates) if (!alternatives.some((x) => x.ref === c.ref)) alternatives.push(c);
+            response = {
+              조회한곳: found.searched,
+              찾은수: found.candidates.length,
+              공고: found.candidates.map((c) => ({
+                ref: c.ref,
+                이름: c.name,
+                기관: c.org,
+                내용: c.summary.slice(0, 100),
+                대상: c.target.slice(0, 80),
+                기한: c.applyEnd || c.deadlineText.slice(0, 30),
+              })),
+              note: found.candidates.length
+                ? "내 지역·조건으로 거른 결과입니다. 맞는 것을 골라 ref와 함께 alternatives에 넣으세요."
+                : "맞는 공고가 없습니다. 검색어를 바꿔 한 번 더 찾거나 google_search로 전국 제도를 확인하세요.",
+            };
+            addTrace({
+              toolName: "find_alternatives",
+              title: `대안 찾기: ${found.candidates.length}건`,
+              basis: found.searched.join(" · ") || "실시간 공고",
+              source: "live",
+              input: { 목적: goal || "-", 안되는지원: blocked || "-", 검색어: keywords.join(", ") },
+              output: found.candidates.length
+                ? Object.fromEntries(found.candidates.map((c, i) => [`${i + 1}`, `${c.name} (${c.org || "기관 미상"})`]))
+                : { 결과: "조건에 맞는 공고 없음" },
+              status: found.candidates.length ? "done" : "warn",
+            });
+          } catch {
+            response = { error: "실시간 공고 조회에 실패했습니다. google_search로 대안을 확인하세요." };
+          }
+        }
       } else if (name === "calculate_eligibility") {
         step("calculate_eligibility", "자격 요건 계산");
         show(thought.slice(-140) || "입력 조건으로 중위소득 비율과 환산 월세를 계산합니다.");

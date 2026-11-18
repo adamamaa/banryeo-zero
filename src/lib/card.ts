@@ -20,6 +20,18 @@ export interface PolicyLimit {
 }
 const LIMIT_FIELDS: LimitField[] = ["age", "income", "medianRatio", "sepMonths", "deposit", "rent"];
 
+// 원하는 지원이 안 될 때 대신 쓸 수 있는 지원
+export interface AnswerAlternative {
+  ref?: string;
+  name: string;
+  benefit?: string;
+  why?: string;
+  deadline?: string;
+  org?: string;
+  url?: string;
+  source?: string;
+}
+
 export interface AnswerCard {
   summary: string;
   facts: { label: string; value: string }[];
@@ -28,7 +40,14 @@ export interface AnswerCard {
   caution?: string;
   followUps: string[];
   policies: PolicyDetail[];
+  alternatives?: AnswerAlternative[];
 }
+
+// 한 줄 답이 "안 된다"는 내용인지 (대안을 찾아야 하는 답)
+export const isNegativeAnswer = (summary: string) =>
+  /제외|안\s*됩니다|안\s*돼|불가|받을\s*수\s*없|신청할\s*수\s*없|대상이\s*아니|해당하지\s*않|어렵습니다|어려워요|미충족|충족하지\s*못|마감(됐|되었)|종료(됐|되었)/.test(
+    summary
+  );
 
 export const CARD_FORMAT = `다른 글 없이 아래 JSON 객체 하나만 출력하세요. 모든 값은 짧은 한국어로 씁니다.
 {
@@ -38,6 +57,13 @@ export const CARD_FORMAT = `다른 글 없이 아래 JSON 객체 하나만 출�
   "links": [{ "name": "사이트 이름", "url": "https://..." }],
   "caution": "놓치기 쉬운 주의점 한 줄 (40자 이내, 없으면 빈 문자열)",
   "followUps": ["사용자가 이어서 물어볼 만한 질문 (25자 이내)"],
+  "alternatives": [{
+    "ref": "find_alternatives 결과의 ref (웹 검색으로 찾았으면 빈 문자열)",
+    "name": "대신 받을 수 있는 지원 이름",
+    "benefit": "지원 내용 (25자 이내)",
+    "why": "이 사용자에게 맞는 이유, 확인할 조건이 있으면 함께 (35자 이내)",
+    "url": "웹 검색으로 찾은 공식 페이지 주소 (ref가 있으면 빈 문자열)"
+  }],
   "policies": [{
     "name": "답변에 나온 정책·제도 이름",
     "benefit": "지원 내용 (25자 이내)",
@@ -49,6 +75,7 @@ export const CARD_FORMAT = `다른 글 없이 아래 JSON 객체 하나만 출�
     "documents": [{ "name": "필요 서류 이름", "where": "발급처 (예: 정부24)" }]
   }]
 }
+alternatives는 원하는 지원이 안 될 때만 최대 3개 넣고, 그 외에는 빈 배열로 두세요.
 facts·steps는 최대 4개, links·followUps·policies는 최대 3개, 정책마다 conditions는 최대 5개, documents는 최대 6개입니다.
 limits에는 숫자로 판정되는 자격 조건만 넣으세요: age는 만 나이, income은 본인 월 소득(만 원), medianRatio는 기준 중위소득 대비 %, sepMonths는 부모님과 따로 산 개월 수, deposit·rent는 보증금·월세(만 원). 가구 기준 조건이면 label에 "가구 기준"이라고 쓰세요. 숫자 조건이 없으면 빈 배열로 두세요.
 policies에는 답변에서 다룬 실제 정책만 넣고, 조건과 서류는 검색으로 확인한 것만 쓰세요. 정책을 다루지 않는 질문이면 빈 배열로 두세요. 해당 없는 항목은 빈 배열로 두세요.`;
@@ -66,7 +93,7 @@ function safeLink(raw: unknown, sites: { name: string; url: string; host: string
     const host = u.hostname.replace(/^www\./, "");
     const site = sites.find((s) => s.host === host);
     if (site) return { name: str(l.name, 20) || site.name, url: site.url };
-    if (!/\.(go|or)\.kr$/.test(host)) return null;
+    if (!/(^|\.)(go\.kr|or\.kr|gov\.kr)$/.test(host)) return null;
     return { name: str(l.name, 20) || host, url: u.origin };
   } catch {
     return null;
@@ -130,6 +157,16 @@ export function parseCard(text: string, sites: { name: string; url: string; host
     links,
     caution: str(raw.caution, 80) || undefined,
     followUps: arr(raw.followUps).map((q) => str(q, 40)).filter(Boolean).slice(0, 3),
+    alternatives: arr(raw.alternatives)
+      .map((a) => ({
+        ref: str(a?.ref, 60) || undefined,
+        name: str(a?.name, 60),
+        benefit: str(a?.benefit, 60) || undefined,
+        why: str(a?.why, 70) || undefined,
+        url: safeLink({ name: a?.name, url: a?.url }, sites)?.url,
+      }))
+      .filter((a) => a.name)
+      .slice(0, 3),
     policies: arr(raw.policies)
       .map(parsePolicy)
       .filter((p): p is PolicyDetail => Boolean(p))
@@ -145,6 +182,7 @@ export const cardToText = (c: AnswerCard) =>
     ...c.steps.map((s, i) => `${i + 1}. ${s}`),
     ...c.links.map((l) => `- ${l.name}: ${l.url}`),
     c.caution && `주의: ${c.caution}`,
+    c.alternatives?.length && `대안: ${c.alternatives.map((a) => a.name).join(", ")}`,
     c.policies.length && `다룬 정책: ${c.policies.map((p) => p.name).join(", ")}`,
   ]
     .filter(Boolean)

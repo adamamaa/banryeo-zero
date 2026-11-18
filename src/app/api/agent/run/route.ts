@@ -8,6 +8,7 @@ import { runAgent } from "@/lib/agent";
 import { recommendGov24, type Gov24Notice } from "@/lib/gov24";
 import { recommendYouth } from "@/lib/youthcenter";
 import { recommendWelfare } from "@/lib/welfare";
+import { resolveAlternatives } from "@/lib/alternatives";
 
 interface UploadedDoc {
   fileName: string;
@@ -590,6 +591,8 @@ export async function POST(req: NextRequest) {
         const up = (userProfile || {}) as Record<string, unknown>;
         const has = (v: unknown) => v !== undefined && v !== null && v !== "" && Number.isFinite(Number(v));
         const label = (v: unknown) => String(v).replace(/[\r\n]/g, " ").slice(0, 20);
+        const text = (v: unknown) => (typeof v === "string" ? label(v).trim() : "");
+        const textList = (v: unknown) => (Array.isArray(v) ? v.map(text).filter(Boolean).slice(0, 8) : []);
         const userInfo = [
           typeof up.sido === "string" &&
             up.sido &&
@@ -703,6 +706,19 @@ ${CARD_FORMAT}`,
             baseSteps: labels,
             signal: req.signal,
             hosts: sites.map((s) => s.host),
+            yk: String(process.env.YOUTHCENTER_API_KEY || "").trim(),
+            profile: {
+              sido: text(up.sido),
+              sigungu: text(up.sigungu),
+              age: has(up.age) ? Number(up.age) : null,
+              job: text(up.job),
+              marriage: text(up.marriage),
+              children: text(up.children),
+              education: text(up.education),
+              company: text(up.company),
+              special: textList(up.special),
+              interests: textList(up.interests),
+            },
           });
           for (const t of out.traces) traces.push({ ...t, step: traces.length + 1 });
           if (out.ok && out.ask) {
@@ -725,7 +741,9 @@ ${CARD_FORMAT}`,
             };
           }
           if (out.ok) {
-            const card = parseCard(out.text, sites);
+            // 대안의 이름·링크·기한은 실제 공고 원본으로 맞춘다
+            const parsed = parseCard(out.text, sites);
+            const card = parsed && resolveAlternatives(parsed, out.alternatives || [], out.summary?.verdict === "ineligible");
             const cited = out.sources
               .filter((s, i) => out.sources.findIndex((x) => x.title === s.title) === i)
               .map((s) => ({ ...s, registered: sites.some((x) => s.title.includes(x.host) || s.url.includes(x.host)) }));

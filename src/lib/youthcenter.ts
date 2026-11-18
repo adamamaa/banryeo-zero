@@ -3,6 +3,7 @@
 // 응답: result.youthPolicyList. 나이·지역·취업상태·혼인·학력·특화조건이 코드로 와서 내 정보와 바로 대조할 수 있다.
 // 키는 서버 환경변수 YOUTHCENTER_API_KEY (온통청년 마이페이지 > OPEN API에서 발급)를 쓴다.
 import { splitDocs, type Gov24Notice } from "./gov24";
+import { mentionsOtherSigungu } from "@/data/regions";
 
 const ENDPOINT = "https://www.youthcenter.go.kr/go/ythip/getPlcy";
 
@@ -184,7 +185,12 @@ async function fetchPage(key: string, params: Record<string, string>): Promise<R
   delete params.pageNum;
   url.searchParams.set("rtnType", "json");
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url, { cache: "no-store" });
+  let res = await fetch(url, { cache: "no-store" });
+  // 같은 요청도 가끔 500이 오고 바로 다시 부르면 정상이라 (2026-11-18 확인) 한 번만 재시도한다
+  if (res.status >= 500) {
+    await new Promise((done) => setTimeout(done, 400));
+    res = await fetch(url, { cache: "no-store" });
+  }
   if (!res.ok) throw new Error(`온통청년 응답 ${res.status}`);
   const json = await res.json();
   const list = json?.result?.youthPolicyList;
@@ -204,6 +210,34 @@ async function loadPool(key: string): Promise<Row[]> {
   if (!rows.length) throw new Error("온통청년 정책을 받지 못했습니다");
   pool = { at: Date.now(), rows };
   return rows;
+}
+
+// 대안 찾기: 키워드로 전체 정책(약 4천 건)을 검색하고 내 조건에 맞는 것만 남긴다
+export async function searchYouth(key: string, q: YouthQuery, keywords: string[]): Promise<Gov24Notice[]> {
+  const pages = await Promise.allSettled(
+    keywords.flatMap((kw) => [fetchPage(key, { plcyNm: kw }), fetchPage(key, { plcyExplnCn: kw })])
+  );
+  if (pages.every((p) => p.status === "rejected")) throw new Error("온통청년 검색 실패");
+  const seen = new Set<string>();
+  return pages
+    .flatMap((p) => (p.status === "fulfilled" ? p.value : []))
+    .filter((r) => {
+      const no = s(r.plcyNo);
+      if (!no || seen.has(no)) return false;
+      seen.add(no);
+      return !mentionsOtherSigungu(`${s(r.sprvsnInstCdNm)} ${s(r.operInstCdNm)} ${s(r.plcyNm)}`, q.sido, q.sigungu);
+    })
+    .map((r) => {
+      const fit = scorePolicy(r, q);
+      // 사업명에 검색어가 있으면 설명에만 있는 것보다 앞에 둔다
+      const hit = keywords.filter((kw) => s(r.plcyNm).includes(kw)).length;
+      return { r, fit, score: fit + hit * 3 };
+    })
+    .filter((x) => x.fit >= 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6)
+    .map((x) => toNotice(x.r))
+    .filter((n) => n.id && n.name);
 }
 
 export async function recommendYouth(

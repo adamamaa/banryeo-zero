@@ -79,6 +79,52 @@ export interface WelfareQuery {
 
 const cache = new Map<string, { at: number; data: Gov24Notice[] }>();
 
+// 대상 집단·가족 상황이 내 조건과 맞는지
+const fitsMe = (x: Item, q: WelfareQuery) => {
+  const mine = q.special || [];
+  const who = `${x.trgterIndvdlNmArray || ""} ${x.servNm || ""}`;
+  if (GROUP_ONLY.some(([re, need]) => re.test(who) && !need.some((n) => mine.includes(n)))) return false;
+  // 미혼이고 자녀·임신이 없으면 난임·임신·출산·신혼 서비스는 뺀다
+  const familyFree = q.marriage === "미혼" && (!q.children || q.children === "없음");
+  return !(familyFree && /난임|임신|출산|신혼|산모|육아/.test(x.servNm || ""));
+};
+
+const toNotice = (x: Item): Gov24Notice => ({
+  source: "welfare",
+  id: x.servId,
+  name: x.servNm.slice(0, 60),
+  org: (x.bizChrDeptNm || [x.ctpvNm, x.sggNm].filter(Boolean).join(" ")).slice(0, 40),
+  summary: (x.servDgst || "").slice(0, 160),
+  target: [x.trgterIndvdlNmArray, x.intrsThemaNmArray].filter(Boolean).join(" · ").slice(0, 120),
+  deadlineText: x.sprtCycNm ? `지원 주기: ${x.sprtCycNm}` : "",
+  docs: [],
+  applyAt: (x.aplyMtdNm || "").slice(0, 40),
+  url: /^https:\/\//.test(x.servDtlLink || "") ? x.servDtlLink : "https://www.bokjiro.go.kr",
+});
+
+// 대안 찾기: 서비스명·내용을 키워드로 검색한다 (시도 공통 사업과 내 시군구 사업만)
+export async function searchWelfare(key: string, q: WelfareQuery, keywords: string[]): Promise<Gov24Notice[]> {
+  const ctpvs = q.sido ? CTPV[q.sido] : undefined;
+  if (!ctpvs) return [];
+  const results = await Promise.allSettled(
+    ctpvs.flatMap((ctpvNm) =>
+      keywords.map((searchWrd) => fetchList(key, { numOfRows: "20", ctpvNm, searchWrd, srchKeyCode: "003" }))
+    )
+  );
+  if (results.every((r) => r.status === "rejected")) throw new Error("복지로 검색 실패");
+  const seen = new Set<string>();
+  return results
+    .flatMap((r) => (r.status === "fulfilled" ? r.value : []))
+    .filter((x) => {
+      if (!x.servId || !x.servNm || seen.has(x.servId)) return false;
+      seen.add(x.servId);
+      return (!x.sggNm || !q.sigungu || x.sggNm === q.sigungu) && fitsMe(x, q);
+    })
+    .sort((a, b) => Number(b.sggNm === q.sigungu) - Number(a.sggNm === q.sigungu))
+    .slice(0, 6)
+    .map(toNotice);
+}
+
 export async function recommendWelfare(
   key: string,
   q: WelfareQuery,
@@ -109,18 +155,12 @@ export async function recommendWelfare(
   }
   if (!anyOk) throw new Error("복지로 조회 실패");
 
-  const mine = q.special || [];
   const seen = new Set<string>();
   const data = items
     .filter((x) => {
       if (!x.servId || seen.has(x.servId)) return false;
       seen.add(x.servId);
-      const who = `${x.trgterIndvdlNmArray || ""} ${x.servNm || ""}`;
-      if (GROUP_ONLY.some(([re, need]) => re.test(who) && !need.some((n) => mine.includes(n)))) return false;
-      // 미혼이고 자녀·임신이 없으면 난임·임신·출산·신혼 서비스는 뺀다
-      const familyFree = q.marriage === "미혼" && (!q.children || q.children === "없음");
-      if (familyFree && /난임|임신|출산|신혼|산모|육아/.test(x.servNm || "")) return false;
-      return true;
+      return fitsMe(x, q);
     })
     .map((x) => {
       let score = 0;
@@ -131,20 +171,7 @@ export async function recommendWelfare(
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, 6)
-    .map(
-      ({ x }): Gov24Notice => ({
-        source: "welfare",
-        id: x.servId,
-        name: x.servNm.slice(0, 60),
-        org: (x.bizChrDeptNm || [x.ctpvNm, x.sggNm].filter(Boolean).join(" ")).slice(0, 40),
-        summary: (x.servDgst || "").slice(0, 160),
-        target: [x.trgterIndvdlNmArray, x.intrsThemaNmArray].filter(Boolean).join(" · ").slice(0, 120),
-        deadlineText: x.sprtCycNm ? `지원 주기: ${x.sprtCycNm}` : "",
-        docs: [],
-        applyAt: (x.aplyMtdNm || "").slice(0, 40),
-        url: /^https:\/\//.test(x.servDtlLink || "") ? x.servDtlLink : "https://www.bokjiro.go.kr",
-      })
-    );
+    .map(({ x }) => toNotice(x));
   cache.set(cacheKey, { at: Date.now(), data });
   return data;
 }

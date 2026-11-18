@@ -1,6 +1,7 @@
 // 답변 검증: AI가 낸 최종 답을 서버가 규칙으로 다시 확인한다.
 // 도구 결과(자격 계산)·오늘 날짜·공식 도메인과 대조해, 고쳐야 할 점이 있으면 AI에게 한 번 다시 쓰게 한다.
-import { parseCard } from "./card";
+import { isNegativeAnswer, parseCard } from "./card";
+import { resolveAlternatives, type AltCandidate } from "./alternatives";
 import type { EligibilitySummary } from "./agent";
 
 export interface VerifyCheck {
@@ -40,15 +41,22 @@ function rawLinks(text: string): string[] {
 
 export function verifyAnswer(
   text: string,
-  opts: { summary?: EligibilitySummary; today?: Date; hosts?: string[] } = {}
+  opts: {
+    summary?: EligibilitySummary;
+    today?: Date;
+    hosts?: string[];
+    alternativesSearched?: boolean;
+    alternatives?: AltCandidate[];
+  } = {}
 ): VerifyCheck[] {
   const checks: VerifyCheck[] = [];
   const today = opts.today ?? new Date();
   const todayYmd = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const s = opts.summary;
+  const hosts = opts.hosts ?? [];
 
   // 1. 형식: 화면이 카드로 보여줄 수 있는 JSON인지
-  const card = parseCard(text);
+  const card = parseCard(text, hosts.map((host) => ({ name: host, url: `https://${host}`, host })));
   checks.push(
     card
       ? { name: "답변 형식", ok: true, note: "근거 카드로 표시 가능", severity: "fix" }
@@ -132,8 +140,28 @@ export function verifyAnswer(
       : { name: "확정 표현", ok: true, note: "단정 표현 없음", severity: "fix" }
   );
 
+  // 대안: "안 된다"로 끝내지 않고 다른 길을 찾았는지 (안 된다는 답일 때만 검사)
+  if (card && (s?.verdict === "ineligible" || isNegativeAnswer(card.summary))) {
+    // 화면에 실제로 나가는 대안만 센다 (원본도 공식 링크도 없는 대안은 빠진다)
+    const count = resolveAlternatives(card, opts.alternatives || [], true).alternatives?.length || 0;
+    checks.push(
+      count || opts.alternativesSearched
+        ? {
+            name: "대안 제시",
+            ok: true,
+            note: count ? `대신 쓸 수 있는 지원 ${count}개 제시` : "실시간 공고에서 대안을 찾아봄",
+            severity: "fix",
+          }
+        : {
+            name: "대안 제시",
+            ok: false,
+            note: "안 된다고만 답했습니다. 사용자의 원래 목적을 정해 find_alternatives로 다른 지원을 찾고, alternatives에 넣어 다시 답하세요.",
+            severity: "fix",
+          }
+    );
+  }
+
   // 6. 링크: 공식 사이트·등록 사이트만 남기고 나머지는 화면에서 뺀다 (고쳐 쓰게 하진 않음)
-  const hosts = opts.hosts ?? [];
   const bad = rawLinks(text).filter((u) => {
     try {
       const url = new URL(u);

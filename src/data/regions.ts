@@ -21,3 +21,11 @@ export const SIGUNGU: Record<string, string[]> = {
 };
 
 export const SIDO = Object.keys(SIGUNGU);
+
+// 글(기관명·사업명)에 같은 시도의 '다른' 시군구가 나오면 true. 내 시군구가 함께 나오면 false
+export function mentionsOtherSigungu(text: string, sido?: string, sigungu?: string) {
+  if (!sido || !sigungu) return false;
+  const has = (name: string) => new RegExp(`(^|[\\s·(\\[])${name}`).test(text);
+  if (has(sigungu)) return false;
+  return (SIGUNGU[sido] || []).some((name) => name !== sigungu && has(name));
+}
