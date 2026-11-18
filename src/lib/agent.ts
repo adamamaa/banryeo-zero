@@ -6,6 +6,7 @@ import { judgeEligibility, MEDIAN_INCOME_2026, estimateNhisFee, medianRatioPerce
 import { fetchGov24Services, type ToolExecution } from "./tools";
 import type { AuditResult } from "./docRules";
 import type { PolicyDetail } from "./card";
+import { verifyAnswer, type Verification } from "./verify";
 
 export interface EligibilitySummary {
   medianRatioPercent: number;
@@ -36,6 +37,13 @@ export interface AgentAsk {
 
 type Step = { label: string; status: "done" | "active" | "pending" };
 
+// AI가 처음에 세우는 실행 계획. tool은 이 단계에서 쓸 도구 (answer = 최종 답 정리)
+export interface PlanStep {
+  label: string;
+  tool: string;
+  done: boolean;
+}
+
 export interface AgentInput {
   key: string;
   level: "medium" | "high";
@@ -46,6 +54,8 @@ export interface AgentInput {
   emit?: (event: string, data: unknown) => void;
   baseSteps: string[];
   signal?: AbortSignal;
+  // 링크 검증에서 공식 사이트로 인정할 등록 사이트 도메인
+  hosts?: string[];
 }
 
 export type AgentOutput =
@@ -59,12 +69,52 @@ export type AgentOutput =
       ask?: AgentAsk;
       draft?: AgentDraft;
       checklist?: AgentChecklist;
+      verification?: Verification;
+      plan?: PlanStep[];
     }
   | { ok: false; error: string; traces: ToolExecution[] };
 
-const MAX_TURNS = 6;
+// 계획 세우기 차례가 하나 늘어서 8번까지
+const MAX_TURNS = 8;
+
+const PLAN_TOOLS = [
+  "google_search",
+  "calculate_eligibility",
+  "lookup_subsidy_list",
+  "audit_documents",
+  "create_draft",
+  "create_checklist",
+  "ask_user",
+  "answer",
+];
 
 const DECLARATIONS = [
+  {
+    name: "make_plan",
+    description:
+      "작업을 시작하기 전에 맨 먼저 한 번 호출해 실행 계획을 세운다. 사용자 목표를 이루려면 어떤 순서로 어떤 도구를 쓸지 2~5단계로 정한다. 마지막 단계는 tool을 answer로 둔다.",
+    parameters: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "사용자가 이루려는 목표 (30자 이내)" },
+        steps: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "단계 이름 (15자 이내, 예: 자격 계산, 최신 공고 검색, 서류 대조)" },
+              tool: {
+                type: "string",
+                description: `이 단계에서 쓸 도구: ${PLAN_TOOLS.join(", ")} 중 하나`,
+              },
+            },
+            required: ["label", "tool"],
+          },
+        },
+      },
+      required: ["goal", "steps"],
+    },
+  },
   {
     name: "calculate_eligibility",
     description:
@@ -170,6 +220,7 @@ const DECLARATIONS = [
 
 const AGENT_RULES = `
 [도구 사용 규칙]
+- 맨 처음에는 반드시 make_plan을 한 번 호출해 2~5단계 계획을 세우고, 그다음 계획 순서대로 도구를 쓰세요. 도중에 계획과 다른 도구가 필요하면 그냥 쓰면 됩니다.
 - 답하기 전에 필요한 도구를 스스로 고르세요: 최신 공고·금액·일정은 google_search, 자격 판정은 calculate_eligibility, 정부 지원사업 목록은 lookup_subsidy_list, 첨부 서류 점검은 audit_documents.
 - 판정에 꼭 필요한 정보가 [사용자 정보]와 대화에 없으면 추측하지 말고 ask_user로 한 가지만 물으세요.
 - 도구 결과에 "추가로필요한정보"가 있으면 최종 답을 내지 말고 바로 ask_user로 그 정보를 물으세요. "확인 필요"를 신청 단계나 주의 문구로 미루지 마세요.
@@ -192,21 +243,47 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
   let audit: { policy: PolicyDetail; result: AuditResult } | undefined;
   let draft: AgentDraft | undefined;
   let checklist: AgentChecklist | undefined;
+  // 답변 검증에서 고칠 점이 나오면 한 번만 다시 쓰게 한다
+  let verifyRetried = false;
+  // AI가 처음에 세운 계획. 도구를 실행할 때마다 해당 단계를 체크한다
+  let plan: PlanStep[] = [];
+  const markPlan = (tool: string) => {
+    const s = plan.find((x) => !x.done && x.tool === tool);
+    if (s) s.done = true;
+    return Boolean(s);
+  };
+  // 계획에 있는 도구면 계획 단계를 체크하고, 계획에 없던 도구면 단계를 따로 추가한다
+  const step = (tool: string, label: string) => {
+    if (!markPlan(tool)) toolSteps.push(label);
+  };
 
-  const show = (thought: string, finishing = false) =>
+  // 진행 단계: (계획) 도구 실행 → 답변 정리 → 답변 검증 → 완료
+  type Phase = "tools" | "write" | "verify" | "done";
+  const show = (thought: string, phase: Phase | boolean = "tools") => {
+    const p: Phase = phase === true ? "write" : phase === false ? "tools" : phase;
+    const order = { tools: 0, write: 1, verify: 2, done: 3 }[p];
+    const planned = plan.filter((x) => x.tool !== "answer");
+    const firstOpen = planned.findIndex((x) => !x.done);
     emit?.("step", {
       steps: [
         ...baseSteps.map((label): Step => ({ label, status: "done" })),
+        // 계획이 있으면 계획 단계를 그대로 보여 주고, 실행한 단계에 체크한다 (건너뛴 단계는 체크하지 않음)
+        ...planned.map((x, i): Step => ({
+          label: x.label,
+          status: x.done ? "done" : p === "tools" && i === firstOpen ? "active" : "pending",
+        })),
         ...toolSteps.map((label, i): Step => ({
           label,
-          status: finishing || i < toolSteps.length - 1 ? "done" : "active",
+          status: plan.length || p !== "tools" || i < toolSteps.length - 1 ? "done" : "active",
         })),
-        // 첫 도구를 고르는 동안에도 진행 중 표시가 보이게
-        ...(!toolSteps.length && !finishing ? [{ label: "필요한 도구 고르기", status: "active" } as Step] : []),
-        { label: "답변 정리", status: finishing ? "active" : "pending" } as Step,
+        // 계획을 세우는 동안에도 진행 중 표시가 보이게
+        ...(!plan.length && !toolSteps.length && p === "tools" ? [{ label: "실행 계획 세우기", status: "active" } as Step] : []),
+        { label: "답변 정리", status: order > 1 ? "done" : order === 1 ? "active" : "pending" } as Step,
+        { label: "답변 검증", status: order > 2 ? "done" : order === 2 ? "active" : "pending" } as Step,
       ],
       thought,
     });
+  };
   const addTrace = (t: Omit<ToolExecution, "step">) => traces.push({ step: traces.length + 1, ...t });
 
   const contents: unknown[] = [...input.request.contents];
@@ -224,7 +301,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
     generationConfig: { thinkingConfig: { thinkingLevel: level, includeThoughts: true } },
   });
 
-  show("AI가 필요한 도구를 고르고 있습니다...");
+  show("AI가 목표를 보고 실행 계획을 세우고 있습니다...");
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     // 마지막 차례에는 도구 없이 답만 받는다
@@ -244,7 +321,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
     for (const p of parts) {
       if (p.toolCall?.toolType === "GOOGLE_SEARCH_WEB") {
         const queries = strs(p.toolCall.args?.queries, 4);
-        toolSteps.push(`웹 검색: ${queries[0] || "최신 공고"}`);
+        step("google_search", `웹 검색: ${queries[0] || "최신 공고"}`);
         addTrace({
           toolName: "google_search",
           title: `웹 검색 ${queries.length}건`,
@@ -271,8 +348,65 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         .join("")
         .trim();
       if (!text) return { ok: false, error: "AI가 빈 답을 보냈습니다.", traces };
-      show("도구 결과를 근거 카드로 정리했습니다.", true);
-      return { ok: true, text, sources: sources.slice(0, 8), traces, summary, audit, draft, checklist };
+
+      // 답변 검증: 수치·판정은 도구 결과와, 날짜는 오늘과, 링크는 공식 도메인과 대조한다
+      show("답변의 수치·판정·날짜·링크를 도구 결과와 대조하고 있습니다.", "verify");
+      const checks = verifyAnswer(text, { summary, hosts: input.hosts });
+      const fixes = checks.filter((c) => !c.ok && c.severity === "fix");
+      const passedCount = checks.filter((c) => c.ok).length;
+      const verifyTrace = (title: string, status: "done" | "warn") =>
+        addTrace({
+          toolName: "answer_verify",
+          title,
+          basis: "도구 결과 · 오늘 날짜 · 공식 도메인과 대조",
+          source: "calc",
+          input: { 검사: checks.map((c) => c.name).join(", ") },
+          output: Object.fromEntries(checks.map((c) => [c.name, `${c.ok ? "통과" : "확인 필요"} · ${c.note}`])),
+          status,
+        });
+
+      if (fixes.length && !verifyRetried && turn < MAX_TURNS - 1) {
+        // 고칠 점을 AI에게 돌려주고 같은 형식으로 다시 쓰게 한다 (한 번만)
+        verifyRetried = true;
+        verifyTrace(`답변 검증: 고칠 점 ${fixes.length}건 → 다시 작성`, "warn");
+        toolSteps.push(`검증 결과 반영해 다시 쓰기 (${fixes.length}건)`);
+        show(`검증에서 고칠 점 ${fixes.length}건을 찾아 답변을 다시 쓰고 있습니다: ${fixes[0].name}`);
+        contents.push(cand.content);
+        contents.push({
+          role: "user",
+          parts: [
+            {
+              text: `[답변 검증 결과] 아래 문제를 고쳐 같은 JSON 형식으로 최종 답을 다시 출력하세요. 도구 결과의 수치와 판정을 그대로 쓰세요.\n${fixes
+                .map((f) => `- ${f.name}: ${f.note}`)
+                .join("\n")}`,
+            },
+          ],
+        });
+        continue;
+      }
+
+      markPlan("answer");
+      const verification: Verification = { passed: !fixes.length, retried: verifyRetried, checks };
+      verifyTrace(
+        `답변 검증 ${passedCount}/${checks.length} 통과${verifyRetried ? " · 1회 고쳐 씀" : ""}`,
+        fixes.length ? "warn" : "done"
+      );
+      show(
+        fixes.length ? `검증 경고 ${fixes.length}건을 표시하고 답변을 보냅니다.` : "도구 결과와 대조해 검증을 마쳤습니다.",
+        "done"
+      );
+      return {
+        ok: true,
+        text,
+        sources: sources.slice(0, 8),
+        traces,
+        summary,
+        audit,
+        draft,
+        checklist,
+        verification,
+        plan: plan.length ? plan.map((x) => ({ ...x })) : undefined,
+      };
     }
 
     contents.push(cand.content);
@@ -282,8 +416,31 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
       const { name, args = {}, id } = p.functionCall as { name: string; args?: Record<string, unknown>; id?: string };
       let response: Record<string, unknown>;
 
-      if (name === "calculate_eligibility") {
-        toolSteps.push("자격 요건 계산");
+      if (name === "make_plan") {
+        const goal = String(args.goal || "").slice(0, 40);
+        const steps: PlanStep[] = (Array.isArray(args.steps) ? args.steps : [])
+          .map((x: Record<string, unknown>) => ({
+            label: String(x?.label || "").slice(0, 20),
+            tool: PLAN_TOOLS.includes(String(x?.tool)) ? String(x?.tool) : "answer",
+            done: false,
+          }))
+          .filter((x: PlanStep) => x.label)
+          .slice(0, 6);
+        if (!steps.some((x) => x.tool === "answer")) steps.push({ label: "답변 정리", tool: "answer", done: false });
+        plan = steps;
+        addTrace({
+          toolName: "make_plan",
+          title: `실행 계획 ${plan.length}단계`,
+          basis: goal || "사용자 목표",
+          source: "live",
+          input: { 목표: goal || "-" },
+          output: Object.fromEntries(plan.map((x, i) => [`${i + 1}`, x.label])),
+          status: "done",
+        });
+        show(`계획: ${plan.map((x) => x.label).join(" → ")}`);
+        response = { saved: true, note: "계획을 저장했습니다. 이제 계획 순서대로 도구를 실행하세요." };
+      } else if (name === "calculate_eligibility") {
+        step("calculate_eligibility", "자격 요건 계산");
         show(thought.slice(-140) || "입력 조건으로 중위소득 비율과 환산 월세를 계산합니다.");
         const age = n(args.age);
         const income = n(args.monthlyIncomeManwon);
@@ -349,7 +506,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         }
       } else if (name === "lookup_subsidy_list") {
         const keyword = String(args.keyword || "청년").slice(0, 20);
-        toolSteps.push(`보조금24 조회: ${keyword}`);
+        step("lookup_subsidy_list", `보조금24 조회: ${keyword}`);
         show(`보조금24 공식 API에서 '${keyword}' 지원사업을 찾습니다.`);
         if (!input.pk) {
           response = { available: false, note: "공공데이터포털 키가 없어 조회할 수 없습니다. google_search로 확인하세요." };
@@ -373,7 +530,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           conditions: strs(args.conditions),
           documents: strs(args.requiredDocuments).map((d) => ({ name: d })),
         };
-        toolSteps.push(`서류 대조: ${policy.name}`);
+        step("audit_documents", `서류 대조: ${policy.name}`);
         show(`첨부 서류를 '${policy.name}' 필요 서류 ${policy.documents.length}종과 대조하고 있습니다.`);
         const result = input.hasDocs && input.audit ? await input.audit(policy) : null;
         if (!result) {
@@ -397,7 +554,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         }
       } else if (name === "create_draft") {
         const title = String(args.title || "신청 사유서").slice(0, 40);
-        toolSteps.push(`초안 작성: ${title}`);
+        step("create_draft", `초안 작성: ${title}`);
         show(`보완점을 반영해 '${title}' 초안을 쓰고 있습니다.`);
         const text = maskPii(String(args.text || "").slice(0, 4000)).masked.trim();
         if (text.length < 50) {
@@ -429,7 +586,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           }))
           .filter((x: { task: string }) => x.task)
           .slice(0, 10);
-        toolSteps.push(`제출 체크리스트 ${items.length}단계`);
+        step("create_checklist", `제출 체크리스트 ${items.length}단계`);
         show("제출 직전에 할 일을 순서대로 정리하고 있습니다.");
         if (!items.length) {
           response = { error: "항목이 없습니다." };
@@ -453,7 +610,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           field: typeof args.field === "string" ? args.field.slice(0, 20) : undefined,
           options: strs(args.options, 4),
         };
-        toolSteps.push("사용자에게 확인 요청");
+        step("ask_user", "사용자에게 확인 요청");
         addTrace({
           toolName: "ask_user",
           title: "추가 정보 요청",
@@ -464,7 +621,18 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           status: "warn",
         });
         show(`판정에 필요한 정보가 없어 사용자에게 묻습니다: ${ask.reason}`, true);
-        return { ok: true, text: "", sources: sources.slice(0, 8), traces, summary, audit, draft, checklist, ask };
+        return {
+          ok: true,
+          text: "",
+          sources: sources.slice(0, 8),
+          traces,
+          summary,
+          audit,
+          draft,
+          checklist,
+          ask,
+          plan: plan.length ? plan.map((x) => ({ ...x })) : undefined,
+        };
       } else {
         response = { error: `알 수 없는 도구: ${name}` };
       }

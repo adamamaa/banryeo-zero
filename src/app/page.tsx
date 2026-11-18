@@ -27,7 +27,9 @@ import { POLICY_SCENARIOS } from "@/data/policies";
 import type { ToolExecution, ToolSource } from "@/lib/tools";
 import type { AuditResult } from "@/lib/docRules";
 import type { AnswerCard, PolicyDetail } from "@/lib/card";
-import type { AgentAsk, AgentChecklist, AgentDraft } from "@/lib/agent";
+import type { AgentAsk, AgentChecklist, AgentDraft, PlanStep } from "@/lib/agent";
+import type { Verification } from "@/lib/verify";
+import { diffSnapshots, takeSnapshot, upcomingDeadlines, type RecheckItem, type Snapshot } from "@/lib/recheck";
 import { AgentOverlay, AgentPlanCard, type AgentPlanStep, type AgentTarget } from "@/components/AgentOverlay";
 import {
   InfoOnboarding,
@@ -155,6 +157,10 @@ interface Message {
   // 실행 단계 산출물: AI가 쓴 제출용 초안과 제출 직전 체크리스트 (사용자가 고치고 체크한 상태 포함)
   draft?: AgentDraft;
   checklist?: AgentChecklist;
+  // 서버가 답변을 도구 결과·오늘 날짜·공식 도메인과 대조한 결과
+  verification?: Verification;
+  // AI가 처음 세운 실행 계획과 단계별 실행 여부
+  plan?: PlanStep[];
   // 이 답변에 쓴 모델과 추론 수준 (AI가 질문 난이도를 보고 고름)
   reasoning?: { model: string; level: "medium" | "high"; reason: string; by: "ai" | "rule" };
   card?: AnswerCard;
@@ -306,6 +312,8 @@ export default function Page() {
   const [onboard, setOnboard] = useState<{ startKey?: InfoKey; single: boolean } | null>(null);
   // 첫 방문 환영 팝업 (intro: 환영 화면부터, false면 질문부터)
   const [welcome, setWelcome] = useState<{ intro: boolean; startKey?: InfoKey; group?: InfoGroup } | null>(null);
+  // 알아서 다시 점검: 내 정보가 바뀌었거나 마감이 다가올 때 바뀐 점
+  const [recheck, setRecheck] = useState<{ items: RecheckItem[]; at: number } | null>(null);
   const [tools, setTools] = useState<ToolExecution[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -399,9 +407,13 @@ export default function Page() {
   };
   // 내 정보 한 항목을 바꾸고 브라우저에 저장한다 (시연 실행이 채운 값은 저장하지 않음)
   const setInfo = (key: InfoKey, value: InfoValue) => {
-    const nextProfile = isProfileKey(key)
+    let nextProfile: ProfileInput = isProfileKey(key)
       ? { ...profile, [key]: value === "" ? "" : Math.max(0, Number(value) || 0) }
       : profile;
+    // 거주 형태가 바뀌면 해당 없는 금액은 지운다 (전세·자가는 월세 없음, 자가는 보증금도 없음)
+    if (key === "housing" && (value === "전세" || value === "자가")) {
+      nextProfile = { ...nextProfile, rentManwon: "", ...(value === "자가" ? { depositManwon: "" as const } : {}) };
+    }
     const nextExtra = isProfileKey(key)
       ? extra
       : {
@@ -565,6 +577,35 @@ export default function Page() {
     if (loaded && !onboard && !welcome && !working && hasProfileInput(profile)) fetchTools();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboard, welcome, loaded]);
+
+  // 알아서 다시 점검: 내 정보가 바뀌면 받을 수 있는 지원과 판정을 다시 계산해 지난 점검과 비교하고,
+  // 받을 수 있는 공고의 마감이 7일 안이면 알린다 (하루에 한 번). 브라우저 계산만 쓴다.
+  const recheckKey = JSON.stringify(benefitCtx);
+  useEffect(() => {
+    if (!loaded || welcome || !hasAnyInfo) return;
+    const t = window.setTimeout(() => {
+      const verdict = hasProfileInput(profile) ? nearMiss(toProfile(profile)).verdict : undefined;
+      const curr = takeSnapshot(benefitCtx, verdict);
+      const prev = loadLocal<Snapshot | null>("gonggopass_recheck_snapshot", null);
+      const changed = prev ? diffSnapshots(prev, curr, benefitCtx) : [];
+      localStorage.setItem("gonggopass_recheck_snapshot", JSON.stringify(curr));
+
+      const today = new Date().toDateString();
+      const seen = loadLocal<{ day: string; titles: string[] }>("gonggopass_recheck_deadline_seen", { day: today, titles: [] });
+      const seenToday = seen.day === today ? seen.titles : [];
+      const deadlines = upcomingDeadlines(benefitCtx).filter((d) => !seenToday.includes(d.title));
+      if (deadlines.length) {
+        localStorage.setItem(
+          "gonggopass_recheck_deadline_seen",
+          JSON.stringify({ day: today, titles: [...seenToday, ...deadlines.map((d) => d.title)] })
+        );
+      }
+      const items = [...changed, ...deadlines];
+      if (items.length) setRecheck({ items, at: Date.now() });
+    }, 700);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recheckKey, loaded, welcome]);
 
   useEffect(() => {
     if (loaded) localStorage.setItem("gonggopass_policy_state", JSON.stringify(policyState));
@@ -1273,6 +1314,8 @@ export default function Page() {
         ask: askData,
         draft: (data.draft as AgentDraft | undefined) || undefined,
         checklist: (data.checklist as AgentChecklist | undefined) || undefined,
+        verification: (data.verification as Verification | undefined) || undefined,
+        plan: (data.plan as PlanStep[] | undefined) || undefined,
         ...(eligibility && {
           artifact: { view: "combo" as View, title: "자격 판정 결과", meta: "입력 조건 기준 계산" },
           followUps: ["recipe", "audit_defect"] as MissionKey[],
@@ -1752,6 +1795,8 @@ export default function Page() {
                               </div>
                             )}
 
+                            {msg.plan && msg.plan.length > 0 && <PlanLine plan={msg.plan} verified={msg.verification?.passed} />}
+
                             {msg.card ? (
                               <CardView card={msg.card} onAsk={(q) => send(undefined, q)} disabled={working} />
                             ) : (
@@ -1815,6 +1860,8 @@ export default function Page() {
                                 근거 보기 · 도구 {msg.traces?.length || 0}건 · 출처 {msg.sources?.length || 0}곳
                               </button>
                             )}
+
+                            {msg.verification && <VerifyBadge v={msg.verification} />}
 
                             {msg.reasoning && (
                               <div
@@ -1906,6 +1953,18 @@ export default function Page() {
           </div>
 
           <div className="shrink-0 px-6 md:px-8 pb-3 max-w-3xl mx-auto w-full space-y-3">
+            {recheck && (
+              <RecheckCard
+                items={recheck.items}
+                at={recheck.at}
+                onOpen={() => {
+                  setCtx("demo");
+                  setView("combo");
+                  setCanvasOpen(true);
+                }}
+                onClose={() => setRecheck(null)}
+              />
+            )}
             {infoCard}
             {promptCard}
           </div>
@@ -3854,6 +3913,119 @@ function KeyValues({ title, data }: { title: string; data: Record<string, string
 
 function Empty({ text }: { text: string }) {
   return <div className="px-4 py-10 text-center text-[13px] text-slate-500">{text}</div>;
+}
+
+// 알아서 다시 점검한 결과 카드 (내 정보 변경·마감 임박)
+function RecheckCard({
+  items,
+  at,
+  onOpen,
+  onClose,
+}: {
+  items: RecheckItem[];
+  at: number;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  const style: Record<RecheckItem["kind"], { mark: string; cls: string }> = {
+    new: { mark: "+", cls: "bg-emerald-100 text-emerald-700" },
+    lost: { mark: "−", cls: "bg-red-100 text-red-700" },
+    verdict: { mark: "⇄", cls: "bg-purple-100 text-purple-700" },
+    deadline: { mark: "!", cls: "bg-amber-100 text-amber-800" },
+  };
+  const time = new Date(at).toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className="animate-fade-up rounded-2xl border border-purple-200/80 bg-white px-4 py-3 shadow-[0_10px_28px_-18px_rgba(109,40,217,0.3)]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-700">
+          <RefreshCw className="h-3.5 w-3.5" />
+          공고패스가 다시 점검했어요
+          <span className="font-normal text-slate-400">{time}</span>
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="닫기"
+          className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <ul className="mt-2 space-y-1.5">
+        {items.slice(0, 5).map((it, i) => (
+          <li key={i} className="flex items-start gap-2 text-[13px]">
+            <span className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full text-[11px] font-bold ${style[it.kind].cls}`}>
+              {style[it.kind].mark}
+            </span>
+            <span className="min-w-0">
+              <span className="text-slate-800">{it.title}</span>
+              {it.detail && <span className="block text-xs text-slate-500">{it.detail}</span>}
+            </span>
+          </li>
+        ))}
+        {items.length > 5 && <li className="text-xs text-slate-400">외 {items.length - 5}건</li>}
+      </ul>
+      <button type="button" onClick={onOpen} className="mt-2 text-xs font-medium text-purple-700 hover:underline">
+        받을 돈 탭에서 자세히 보기 →
+      </button>
+    </div>
+  );
+}
+
+// AI가 처음 세운 계획과 실행 결과: "AI 계획 ① 자격 계산 ✓ → ② 웹 검색 ✓ → ③ 답변 정리 ✓ → 검증 ✓"
+function PlanLine({ plan, verified }: { plan: PlanStep[]; verified?: boolean }) {
+  const circled = "①②③④⑤⑥⑦⑧";
+  return (
+    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-slate-500">
+      <span className="font-semibold text-purple-600">AI 계획</span>
+      {plan.map((s, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && <ArrowRight className="h-3 w-3 text-slate-300" aria-hidden />}
+          <span className={s.done ? "text-slate-700" : "text-slate-400 line-through"} title={s.done ? "실행함" : "실행하지 않음"}>
+            {circled[i] || `${i + 1}.`} {s.label}
+            {s.done && <span className="ml-0.5 text-emerald-600">✓</span>}
+          </span>
+        </React.Fragment>
+      ))}
+      {verified !== undefined && (
+        <>
+          <ArrowRight className="h-3 w-3 text-slate-300" aria-hidden />
+          <span className={verified ? "text-emerald-700" : "text-amber-700"}>답변 검증 {verified ? "✓" : "!"}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+// 답변 검증 결과: 통과/경고 한 줄 + 펼치면 검사 항목별 결과
+function VerifyBadge({ v }: { v: Verification }) {
+  const passed = v.checks.filter((c) => c.ok).length;
+  const failed = v.checks.filter((c) => !c.ok);
+  return (
+    <details className="group text-xs">
+      <summary
+        className={`inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full px-2.5 py-1 font-medium ring-1 ${
+          v.passed ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-800 ring-amber-200"
+        }`}
+      >
+        {v.passed ? <Check className="h-3.5 w-3.5" strokeWidth={2.5} /> : <CircleAlert className="h-3.5 w-3.5" />}
+        {v.passed ? `답변 검증 통과 ${passed}/${v.checks.length}` : `검증 경고 ${failed.length}건 · 원문을 꼭 확인하세요`}
+        {v.retried && <span className="font-normal opacity-80">· 1회 고쳐 씀</span>}
+        <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+      </summary>
+      <ul className="mt-2 space-y-1 rounded-xl border border-slate-200 bg-white p-3">
+        {v.checks.map((c) => (
+          <li key={c.name} className="flex gap-2">
+            <span className={`shrink-0 font-medium ${c.ok ? "text-emerald-600" : c.severity === "fix" ? "text-amber-700" : "text-slate-500"}`}>
+              {c.ok ? "✓" : "!"} {c.name}
+            </span>
+            <span className="text-slate-500">{c.note}</span>
+          </li>
+        ))}
+        <li className="pt-1 text-[11px] text-slate-400">도구 계산 결과 · 오늘 날짜 · 공식 도메인과 서버에서 대조했어요.</li>
+      </ul>
+    </details>
+  );
 }
 
 // 아직 입력이 없을 때 탭에 보여주는 빈 화면 (필요하면 입력 버튼)

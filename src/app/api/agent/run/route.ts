@@ -610,6 +610,7 @@ ${CARD_FORMAT}`,
             emit,
             baseSteps: labels,
             signal: req.signal,
+            hosts: sites.map((s) => s.host),
           });
           for (const t of out.traces) traces.push({ ...t, step: traces.length + 1 });
           if (out.ok && out.ask) {
@@ -623,6 +624,7 @@ ${CARD_FORMAT}`,
                 ask: out.ask,
                 draft: out.draft,
                 checklist: out.checklist,
+                plan: out.plan,
                 reply: `${out.ask.question}${out.ask.reason ? `\n\n필요한 이유: ${out.ask.reason}` : ""}`,
                 toolExecutions: traces,
                 summary: out.summary,
@@ -651,6 +653,8 @@ ${CARD_FORMAT}`,
                 ...(out.audit && { auditResult: out.audit.result, auditPolicy: out.audit.policy }),
                 draft: out.draft,
                 checklist: out.checklist,
+                verification: out.verification,
+                plan: out.plan,
               },
             };
           }
