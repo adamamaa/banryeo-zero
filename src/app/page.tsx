@@ -174,6 +174,12 @@ interface Staged {
 
 const REGION = "서울특별시 관악구 봉천로 123, 301호";
 
+// 사이드바·오른쪽 패널 너비 범위 (px)
+const SIDE_DEFAULT = 270;
+const SIDE_MIN = 220;
+const SIDE_MAX = 420;
+const PANEL_MIN = 360;
+
 interface Site {
   id: string;
   name: string;
@@ -282,6 +288,58 @@ const risksOf = (a: { findings: { severity: string }[] }) =>
 
 export default function Page() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // 마우스로 조절하는 너비 (브라우저에 기억). 오른쪽 패널 null = 기본 46%
+  const [sideW, setSideW] = useState(SIDE_DEFAULT);
+  const [panelW, setPanelW] = useState<number | null>(null);
+  const [resizing, setResizing] = useState<null | "side" | "panel">(null);
+  const widthsRef = useRef<{ side: number; panel: number | null }>({ side: SIDE_DEFAULT, panel: null });
+  const saveWidths = (side: number, panel: number | null) => {
+    widthsRef.current = { side, panel };
+    localStorage.setItem("gonggopass_widths", JSON.stringify(widthsRef.current));
+  };
+  const clampSide = (w: number) => Math.round(Math.min(SIDE_MAX, Math.max(SIDE_MIN, w)));
+  const clampPanel = (w: number) => Math.round(Math.min(window.innerWidth * 0.7, Math.max(PANEL_MIN, w)));
+  // 경계선을 끌면 너비가 바뀐다 (끄는 동안은 애니메이션을 끄고 글자 선택을 막는다)
+  const startResize = (kind: "side" | "panel") => (e: React.PointerEvent) => {
+    e.preventDefault();
+    setResizing(kind);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    const move = (ev: PointerEvent) => {
+      if (kind === "side") {
+        const w = clampSide(ev.clientX);
+        widthsRef.current.side = w;
+        setSideW(w);
+      } else {
+        const w = clampPanel(window.innerWidth - ev.clientX);
+        widthsRef.current.panel = w;
+        setPanelW(w);
+      }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      setResizing(null);
+      saveWidths(widthsRef.current.side, widthsRef.current.panel);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  // 키보드(←/→)로도 조절
+  const nudge = (kind: "side" | "panel", dx: number) => {
+    if (kind === "side") {
+      const w = clampSide(widthsRef.current.side + dx);
+      setSideW(w);
+      saveWidths(w, widthsRef.current.panel);
+    } else {
+      const base = widthsRef.current.panel ?? window.innerWidth * 0.46;
+      const w = clampPanel(base - dx);
+      setPanelW(w);
+      saveWidths(widthsRef.current.side, w);
+    }
+  };
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [view, setView] = useState<View>("combo");
 
@@ -556,6 +614,13 @@ export default function Page() {
       setCustom(safe);
       setAddedIds(saved.added || DEFAULT_TOOLS);
     }
+    // 지난번에 조절한 사이드바·패널 너비
+    const savedW = loadLocal<{ side?: number; panel?: number | null }>("gonggopass_widths", {});
+    const sw = typeof savedW.side === "number" ? Math.min(SIDE_MAX, Math.max(SIDE_MIN, savedW.side)) : SIDE_DEFAULT;
+    const pw = typeof savedW.panel === "number" ? Math.min(window.innerWidth * 0.7, Math.max(PANEL_MIN, savedW.panel)) : null;
+    widthsRef.current = { side: sw, panel: pw };
+    setSideW(sw);
+    setPanelW(pw);
     const savedInfo = loadSavedInfo();
     setProfile(savedInfo.profile);
     setExtra(savedInfo.extra);
@@ -1554,12 +1619,13 @@ export default function Page() {
         {/* ───────── 사이드바 ───────── */}
         <aside
           aria-hidden={!sidebarOpen}
-          className={`shrink-0 overflow-hidden bg-[#fbfbfb] selection:bg-purple-200 max-lg:hidden transition-[width,opacity,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-            sidebarOpen ? "w-[270px] border-r border-slate-100 opacity-100" : "w-0 border-r-0 opacity-0 pointer-events-none"
-          }`}
+          style={{ "--side-w": `${sideW}px` } as React.CSSProperties}
+          className={`shrink-0 overflow-hidden bg-[#fbfbfb] selection:bg-purple-200 max-lg:hidden ${
+            resizing ? "" : "transition-[width,opacity,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+          } ${sidebarOpen ? "w-[var(--side-w)] border-r border-slate-100 opacity-100" : "w-0 border-r-0 opacity-0 pointer-events-none"}`}
         >
           <div
-            className={`flex h-full w-[270px] flex-col justify-between p-4 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            className={`flex h-full w-[var(--side-w)] flex-col justify-between p-4 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
               sidebarOpen ? "translate-x-0" : "-translate-x-4"
             }`}
           >
@@ -1706,6 +1772,19 @@ export default function Page() {
         </aside>
 
         {/* ───────── 메인 워크스페이스 ───────── */}
+        {sidebarOpen && (
+          <ResizeHandle
+            label="사이드바 너비 조절"
+            active={resizing === "side"}
+            onPointerDown={startResize("side")}
+            onReset={() => {
+              setSideW(SIDE_DEFAULT);
+              saveWidths(SIDE_DEFAULT, widthsRef.current.panel);
+            }}
+            onNudge={(dx) => nudge("side", dx)}
+          />
+        )}
+
         <main className="flex-1 flex flex-col bg-[#f6f4fe] overflow-hidden relative justify-between min-w-0">
           <header className="h-16 px-6 shrink-0 flex items-center justify-between border-b border-transparent">
             <div className="flex items-center gap-2">
@@ -2025,12 +2104,28 @@ export default function Page() {
           </div>
         </main>
 
+      {canvasOpen && (
+        <ResizeHandle
+          label="점검 패널 너비 조절"
+          active={resizing === "panel"}
+          onPointerDown={startResize("panel")}
+          onReset={() => {
+            setPanelW(null);
+            saveWidths(widthsRef.current.side, null);
+          }}
+          onNudge={(dx) => nudge("panel", dx)}
+        />
+      )}
+
       {/* ───────── 결과 패널 ───────── */}
       <section
         aria-hidden={!canvasOpen}
-        className={`flex shrink-0 flex-col overflow-hidden bg-[#fbfbfb] transition-[width,opacity,transform,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] max-lg:fixed max-lg:inset-0 max-lg:z-30 max-lg:w-full ${
+        style={panelW ? ({ "--panel-w": `${panelW}px` } as React.CSSProperties) : undefined}
+        className={`flex shrink-0 flex-col overflow-hidden bg-[#fbfbfb] max-lg:fixed max-lg:inset-0 max-lg:z-30 max-lg:w-full ${
+          resizing ? "" : "transition-[width,opacity,transform,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+        } ${
           canvasOpen
-            ? "lg:w-[46%] lg:border-l lg:border-slate-100 opacity-100 max-lg:translate-x-0"
+            ? `${panelW ? "lg:w-[var(--panel-w)]" : "lg:w-[46%]"} lg:border-l lg:border-slate-100 opacity-100 max-lg:translate-x-0`
             : "lg:w-0 lg:border-l-0 opacity-0 pointer-events-none max-lg:translate-x-full"
         }`}
       >
@@ -3962,6 +4057,50 @@ function KeyValues({ title, data }: { title: string; data: Record<string, string
 
 function Empty({ text }: { text: string }) {
   return <div className="px-4 py-10 text-center text-[13px] text-slate-500">{text}</div>;
+}
+
+// 사이드바·패널 경계선: 끌어서 너비 조절, 두 번 누르면 기본값, ←/→ 키로도 조절
+function ResizeHandle({
+  label,
+  active,
+  onPointerDown,
+  onReset,
+  onNudge,
+}: {
+  label: string;
+  active: boolean;
+  onPointerDown: (e: React.PointerEvent) => void;
+  onReset: () => void;
+  onNudge: (dx: number) => void;
+}) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      title={`${label} (끌어서 조절 · 두 번 누르면 기본 크기)`}
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onDoubleClick={onReset}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          onNudge(-16);
+        } else if (e.key === "ArrowRight") {
+          e.preventDefault();
+          onNudge(16);
+        }
+      }}
+      // 화면 폭을 차지하지 않게 음수 여백으로 경계선 위에 겹친다
+      className="group relative z-20 -mx-[3px] w-1.5 shrink-0 cursor-col-resize touch-none outline-none max-lg:hidden"
+    >
+      <span
+        className={`absolute inset-y-0 left-1/2 w-[3px] -translate-x-1/2 rounded-full transition-colors ${
+          active ? "bg-purple-400" : "bg-transparent group-hover:bg-purple-300 group-focus-visible:bg-purple-400"
+        }`}
+      />
+    </div>
+  );
 }
 
 // 알아서 다시 점검한 결과 카드 (내 정보 변경·마감 임박)
