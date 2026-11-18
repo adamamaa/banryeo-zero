@@ -3,7 +3,7 @@
 // 키는 서버 환경변수 PUBLIC_DATA_API_KEY (공공데이터포털 일반 인증키)를 쓴다. 키가 없으면 조회하지 않는다.
 
 import { SIDO_FULL } from "@/data/regions";
-import { PERIOD_UNKNOWN, localYmd, parseApplyPeriod, trustedPeriod } from "./deadline";
+import { PERIOD_UNKNOWN, byDeadline, localYmd, parseApplyPeriod, trustedPeriod } from "./deadline";
 import { ymdOf, type OfficialRecord } from "./officialFacts";
 import { relevanceScore, wantedTopics, type RelevanceProfile } from "./relevance";
 
@@ -227,10 +227,13 @@ export async function recommendGov24(
       seen.add(id);
       return true;
     })
-    // 지역 순서는 유지하고, 내 상황과 관련 있는 공고만 남긴다
-    .map((r) => ({ r, score: relevanceScore(toNotice(r), q) }))
-    .filter((x) => x.score >= 0)
-    .sort((a, b) => b.score - a.score)
+    // 내 상황과 관련 있는 공고만 남기고, 마감일이 확인된 공고를 먼저 고른다
+    .map((r) => {
+      const notice = toNotice(r);
+      return { r, notice, score: relevanceScore(notice, q) };
+    })
+    .filter((x) => x.score >= 0 && (!x.notice.applyEnd || x.notice.applyEnd >= todayYmd()))
+    .sort((a, b) => byDeadline(a.notice, b.notice) || b.score - a.score)
     .slice(0, 10)
     .map((x) => x.r);
 

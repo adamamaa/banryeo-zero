@@ -10,6 +10,7 @@ import { recommendWelfare } from "@/lib/welfare";
 import { resolveAlternatives } from "@/lib/alternatives";
 import { downloadName, fileMeta } from "@/lib/fileExport";
 import { applyOfficial } from "@/lib/officialFacts";
+import { byDeadline, localYmd } from "@/lib/deadline";
 
 interface UploadedDoc {
   fileName: string;
@@ -268,7 +269,7 @@ export async function POST(req: NextRequest) {
       if (!gov.ok && !youth.ok && !welfare.ok)
         return NextResponse.json({ connected: false, reason: "error", notices: [], sources: [] });
 
-      // 순서: 온통청년(조건 코드로 거름) → 복지로 지자체(내 시군구) → 보조금24. 이름이 겹치면 하나만 둔다
+      // 순서: 마감일이 확인된 공고 → 온통청년(조건 코드로 거름) → 복지로 지자체(내 시군구) → 보조금24. 이름이 겹치면 하나만 둔다
       const norm = (name: string) => name.replace(/[\s()·\-[\]]/g, "").replace(/^20\d{2}(년)?/, "");
       const notices: Gov24Notice[] = [];
       const add = (list: Gov24Notice[], max: number) => {
@@ -280,6 +281,11 @@ export async function POST(req: NextRequest) {
           n++;
         }
       };
+      const today = localYmd();
+      add(
+        [...youth.n, ...welfare.n, ...gov.n].filter((n) => n.applyEnd && n.applyEnd >= today).sort((a, b) => byDeadline(a, b, today)),
+        10
+      );
       add(youth.n, 5);
       add(welfare.n, 3);
       add(gov.n, 3);

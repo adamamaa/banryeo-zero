@@ -51,6 +51,18 @@ export function trustedPeriod(
   return { start, end, uncertain: false };
 }
 
+type Dated = { applyStart?: string; applyEnd?: string };
+
+// 마감일이 확인된 공고를 앞으로: 지금 접수 중(마감 빠른 순) → 곧 시작(시작 빠른 순) → 나머지
+export function byDeadline(a: Dated, b: Dated, today = localYmd()) {
+  const rank = (n: Dated) => (!n.applyEnd || n.applyEnd < today ? 2 : n.applyStart && n.applyStart > today ? 1 : 0);
+  const [ra, rb] = [rank(a), rank(b)];
+  if (ra !== rb) return ra - rb;
+  if (ra === 2) return 0;
+  const key = (n: Dated) => (ra === 1 ? n.applyStart! : n.applyEnd!);
+  return key(a).localeCompare(key(b));
+}
+
 // 화면에 보여 줄 신청 기한 종류
 export const deadlineKind = (n: { applyEnd?: string; deadlineText: string }) =>
   n.applyEnd ? "date" : /상시/.test(n.deadlineText) ? "always" : "check";

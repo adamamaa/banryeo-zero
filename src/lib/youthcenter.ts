@@ -4,7 +4,7 @@
 // 키는 서버 환경변수 YOUTHCENTER_API_KEY (온통청년 마이페이지 > OPEN API에서 발급)를 쓴다.
 import { splitDocs, type Gov24Notice } from "./gov24";
 import { mentionsOtherSigungu } from "@/data/regions";
-import { PERIOD_UNKNOWN, trustedPeriod } from "./deadline";
+import { PERIOD_UNKNOWN, byDeadline, trustedPeriod } from "./deadline";
 import { ymdOf, type OfficialRecord } from "./officialFacts";
 import { relevanceScore } from "./relevance";
 
@@ -314,7 +314,7 @@ export async function recommendYouth(
       return { notice, fit, related, score: fit + related * 2 };
     })
     .filter((x) => x.fit >= 0 && x.related >= 0 && x.notice.id && x.notice.name)
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => byDeadline(a.notice, b.notice) || b.score - a.score)
     .slice(0, 10)
     .map((x) => x.notice);
   cache.set(cacheKey, { at: Date.now(), data });
