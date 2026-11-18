@@ -13,6 +13,9 @@ export interface BenefitCtx {
   sepMonths: number | null;
   depositManwon: number | null;
   rentManwon: number | null;
+  // 거주 형태·주택 소유 (선택 입력. 비어 있으면 판정에 쓰지 않는다)
+  housing?: string;
+  homeOwner?: string;
 }
 
 export type NeedKey = "sido" | "age" | "job" | "incomeManwon" | "sepMonths" | "rentManwon" | "depositManwon";
@@ -61,6 +64,13 @@ const ratioMax = (c: BenefitCtx, max: number) => () => {
 };
 const livesApart = (c: BenefitCtx) => () =>
   c.sepMonths === null ? need("sepMonths", "독립 여부") : c.sepMonths === 0 ? no("부모님과 따로 살아야 대상") : null;
+// 월세 지원: 월세로 사는 무주택자만 (입력하지 않았으면 판정하지 않음)
+const rentsHome = (c: BenefitCtx) => () =>
+  c.homeOwner === "주택 보유"
+    ? no("무주택자만 대상")
+    : c.housing && c.housing !== "월세" && c.housing !== "기숙사·고시원"
+    ? no(`월세로 사는 경우만 대상 (지금 ${c.housing})`)
+    : null;
 const inSido = (c: BenefitCtx, sido: string) => () =>
   !c.sido ? need("sido", "거주 지역") : c.sido !== sido ? no(`${sido} 거주자만 대상`) : null;
 const jobIn = (c: BenefitCtx, jobs: string[], label: string) => () =>
@@ -88,6 +98,7 @@ export const BENEFITS: Benefit[] = [
       rules(c, [
         ageIn(c, 19, 34),
         livesApart(c),
+        rentsHome(c),
         ratioMax(c, 60),
         () => {
           if (c.rentManwon === null) return need("rentManwon", "월세");
@@ -114,7 +125,7 @@ export const BENEFITS: Benefit[] = [
       { name: "임대차계약서", validDays: null },
       { name: "건강보험료 납부확인서", validDays: 30 },
     ],
-    check: (c) => rules(c, [inSido(c, "서울"), ageIn(c, 19, 39), livesApart(c), ratioMax(c, 150)]),
+    check: (c) => rules(c, [inSido(c, "서울"), ageIn(c, 19, 39), livesApart(c), rentsHome(c), ratioMax(c, 150)]),
   },
   {
     id: "housing-benefit",

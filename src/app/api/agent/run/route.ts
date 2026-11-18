@@ -506,8 +506,14 @@ export async function POST(req: NextRequest) {
           typeof up.job === "string" && up.job && `하는 일: ${label(up.job)}`,
           has(up.income) && `월 소득 ${Number(up.income)}만 원`,
           has(up.sepMonths) && (Number(up.sepMonths) ? `부모님과 따로 산 지 ${Number(up.sepMonths)}개월` : "부모님과 함께 거주"),
+          typeof up.housing === "string" && up.housing && `거주 형태: ${label(up.housing)}`,
           has(up.deposit) && `보증금 ${Number(up.deposit)}만 원`,
           has(up.rent) && `월세 ${Number(up.rent)}만 원`,
+          // 추가 조건 ("혼인: 미혼", "우대 조건: 기초생활수급 · 한부모 가정" 등)
+          ...(Array.isArray(up.more) ? up.more : [])
+            .filter((m): m is string => typeof m === "string")
+            .slice(0, 20)
+            .map((m) => m.replace(/[\r\n]/g, " ").slice(0, 80)),
         ]
           .filter(Boolean)
           .join(", ");
@@ -569,7 +575,7 @@ export async function POST(req: NextRequest) {
 - 검색 결과가 [계산·조회 결과]의 시연용 공고 기준과 다르면 둘을 나란히 밝히고, 실제 신청 전에는 공식 공고를 확인하라고 안내하세요.
 - 정책의 자격, 금액, 기한, 신청 방법은 검색으로 확인한 뒤 답하세요. 검색할 때 [등록된 사이트]의 도메인을 먼저 살펴보세요.
 - [계산·조회 결과]가 있으면 그 수치만 쓰고 새로 만들지 마세요. source가 "sample"인 결과는 시연용 예시 데이터라고 밝히세요.
-- [사용자 정보]가 있으면 그 조건(지역, 나이, 하는 일, 소득, 주거)에 맞는 정책과 자격 여부를 우선해 답하고, 조건 때문에 안 되는 정책은 왜 안 되는지 짧게 밝히세요.
+- [사용자 정보]가 있으면 그 조건(지역, 나이, 하는 일, 소득, 주거, 혼인·자녀, 학력·병역, 재산, 우대 조건, 관심 분야)에 맞는 정책과 자격 여부를 우선해 답하고, 조건 때문에 안 되는 정책은 왜 안 되는지 짧게 밝히세요. 병역을 마친 경우 공고의 연령 연장 규정을, 우대 조건이 있으면 가점·우선 선발 여부를 함께 확인하세요.
 - [첨부 문서]가 있으면 그 내용을 근거로 답하고, 문서에 없는 내용은 없다고 말하세요.
 - 확인하지 못한 내용은 추측하지 말고 "확인하지 못했습니다"라고 한 뒤, 확인할 수 있는 사이트를 안내하세요.
 - "100% 통과" 같은 확정 표현을 쓰지 말고, 최종 판정은 접수 기관이 한다고 안내하세요.

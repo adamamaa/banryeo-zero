@@ -29,7 +29,18 @@ import type { AuditResult } from "@/lib/docRules";
 import type { AnswerCard, PolicyDetail } from "@/lib/card";
 import type { AgentAsk, AgentChecklist, AgentDraft } from "@/lib/agent";
 import { AgentOverlay, AgentPlanCard, type AgentPlanStep, type AgentTarget } from "@/components/AgentOverlay";
-import { InfoOnboarding, InfoTags, firstMissing, type InfoKey, type InfoValue, type InfoValues } from "@/components/InfoOnboarding";
+import {
+  InfoOnboarding,
+  InfoTags,
+  WelcomeModal,
+  TEXT_INFO_KEYS,
+  extraSummary,
+  firstMissing,
+  type InfoGroup,
+  type InfoKey,
+  type InfoValue,
+  type InfoValues,
+} from "@/components/InfoOnboarding";
 import { AfterCare, BenefitCombo, DocCalendar, NearMissCard, PolicyNearMissCard } from "@/components/Insights";
 import { SidebarRecs } from "@/components/SidebarRecs";
 import { nearMiss } from "@/lib/nearMiss";
@@ -91,13 +102,10 @@ const toProfile = (p: ProfileInput): Profile => ({
 
 const hasProfileInput = (p: ProfileInput) => Object.values(p).some((v) => v !== "");
 
-// 계산에 쓰지 않는 내 정보 (AI 답변 맞춤용)
-interface ExtraInfo {
-  sido: string;
-  sigungu: string;
-  job: string;
-}
-const EMPTY_EXTRA: ExtraInfo = { sido: "", sigungu: "", job: "" };
+// 숫자 계산에 쓰지 않는 내 정보 (지역·하는 일·거주 형태와 추가 조건 전부, 문자열로 저장)
+type ExtraKey = (typeof TEXT_INFO_KEYS)[number];
+type ExtraInfo = Record<ExtraKey, string>;
+const EMPTY_EXTRA = Object.fromEntries(TEXT_INFO_KEYS.map((k) => [k, ""])) as ExtraInfo;
 const PROFILE_KEYS: (keyof Profile)[] = ["age", "incomeManwon", "depositManwon", "rentManwon", "sepMonths"];
 // AI 되묻기(ask_user)의 field → 내 정보 항목과 단위
 const ASK_FIELDS: Record<string, { key?: keyof Profile; unit: string; type: "number" | "date" | "text" }> = {
@@ -121,14 +129,12 @@ const loadSavedInfo = () => {
     const v = saved?.profile?.[k];
     if (typeof v === "number" && Number.isFinite(v) && v >= 0) profile[k] = v;
   }
-  return {
-    profile,
-    extra: {
-      sido: typeof saved?.extra?.sido === "string" ? saved.extra.sido.slice(0, 20) : "",
-      sigungu: typeof saved?.extra?.sigungu === "string" ? saved.extra.sigungu.slice(0, 20) : "",
-      job: typeof saved?.extra?.job === "string" ? saved.extra.job.slice(0, 20) : "",
-    },
-  };
+  const extra = { ...EMPTY_EXTRA };
+  for (const k of TEXT_INFO_KEYS) {
+    const v = saved?.extra?.[k];
+    if (typeof v === "string") extra[k] = v.slice(0, 120);
+  }
+  return { profile, extra };
 };
 
 interface Message {
@@ -298,6 +304,8 @@ export default function Page() {
   const [extra, setExtra] = useState<ExtraInfo>(EMPTY_EXTRA);
   // 내 정보 질문 카드: 첫 방문이면 자동으로 열리고, 태그를 누르면 그 항목만 고친다
   const [onboard, setOnboard] = useState<{ startKey?: InfoKey; single: boolean } | null>(null);
+  // 첫 방문 환영 팝업 (intro: 환영 화면부터, false면 질문부터)
+  const [welcome, setWelcome] = useState<{ intro: boolean; startKey?: InfoKey; group?: InfoGroup } | null>(null);
   const [tools, setTools] = useState<ToolExecution[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -370,11 +378,13 @@ export default function Page() {
   const panelHasData =
     messages.length > 0 || tools.length > 0 || summary !== null || upload !== null || hasProfileInput(profile);
 
-  const info: InfoValues = { ...profile, sido: extra.sido, sigungu: extra.sigungu, job: extra.job };
+  const info: InfoValues = { ...extra, ...profile };
   // 패널은 사용자가 넣은 정보·서류가 있을 때만 채운다
   const hasAnyInfo = Object.values(info).some((v) => v !== "");
   const hasAudit = demoAudit || upload !== null;
-  const startInfo = () => setOnboard({ startKey: firstMissing(info), single: false });
+  // 여러 항목을 이어서 입력할 때는 팝업으로 (한 항목 수정은 입력창 위 작은 카드)
+  const startInfo = () => setWelcome({ intro: false, startKey: firstMissing(info), group: "basic" });
+  const startExtra = () => setWelcome({ intro: false, startKey: firstMissing(info, "extra"), group: "extra" });
   const numOrNull = (v: number | "") => (v === "" ? null : v);
   const benefitCtx: BenefitCtx = {
     sido: extra.sido,
@@ -384,6 +394,8 @@ export default function Page() {
     sepMonths: numOrNull(profile.sepMonths),
     depositManwon: numOrNull(profile.depositManwon),
     rentManwon: numOrNull(profile.rentManwon),
+    housing: extra.housing,
+    homeOwner: extra.homeOwner,
   };
   // 내 정보 한 항목을 바꾸고 브라우저에 저장한다 (시연 실행이 채운 값은 저장하지 않음)
   const setInfo = (key: InfoKey, value: InfoValue) => {
@@ -405,6 +417,10 @@ export default function Page() {
   const closeOnboard = () => {
     if (onboard && !onboard.single) localStorage.setItem("gonggopass_onboarded", "1");
     setOnboard(null);
+  };
+  const closeWelcome = () => {
+    localStorage.setItem("gonggopass_onboarded", "1");
+    setWelcome(null);
   };
 
   const newChat = () => {
@@ -529,7 +545,7 @@ export default function Page() {
     const savedInfo = loadSavedInfo();
     setProfile(savedInfo.profile);
     setExtra(savedInfo.extra);
-    if (!localStorage.getItem("gonggopass_onboarded")) setOnboard({ single: false });
+    if (!localStorage.getItem("gonggopass_onboarded")) setWelcome({ intro: true });
     setPolicyState(loadLocal<Record<string, PolicyState>>("gonggopass_policy_state", {}));
     // 30일 지난 정책 정보는 버린다 (정책이 바뀌었을 수 있음)
     const month = Date.now() - 30 * 24 * 3600 * 1000;
@@ -546,9 +562,9 @@ export default function Page() {
 
   // 내 정보 입력을 마치면(또는 저장된 정보로 들어오면) 자격 계산을 바로 돌려 판정 탭을 채운다
   useEffect(() => {
-    if (loaded && !onboard && !working && hasProfileInput(profile)) fetchTools();
+    if (loaded && !onboard && !welcome && !working && hasProfileInput(profile)) fetchTools();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onboard, loaded]);
+  }, [onboard, welcome, loaded]);
 
   useEffect(() => {
     if (loaded) localStorage.setItem("gonggopass_policy_state", JSON.stringify(policyState));
@@ -1171,7 +1187,7 @@ export default function Page() {
           sites: myTools.map(({ name, url }) => ({ name, url })),
           // 입력하지 않은 항목은 보내지 않는다 (서버가 시연 기본값을 쓴다). 0은 0으로 보낸다.
           userProfile:
-            hasProfileInput(prof) || extra.sido || extra.job
+            hasProfileInput(prof) || Object.values(extra).some(Boolean)
               ? {
                   sigungu: extra.sigungu || undefined,
                   age: prof.age === "" ? undefined : prof.age,
@@ -1181,6 +1197,9 @@ export default function Page() {
                   sepMonths: prof.sepMonths === "" ? undefined : prof.sepMonths,
                   sido: extra.sido || undefined,
                   job: extra.job || undefined,
+                  housing: extra.housing || undefined,
+                  // 추가 조건 (혼인·자녀·학력·병역·우대 조건 등)을 "항목: 값" 문장으로
+                  more: extraSummary(info),
                 }
               : undefined,
         },
@@ -1352,7 +1371,8 @@ export default function Page() {
             <InfoTags
               values={info}
               onEdit={(k) => setOnboard({ startKey: k, single: true })}
-              onStart={() => setOnboard({ startKey: firstMissing(info), single: false })}
+              onStart={startInfo}
+              onStartExtra={startExtra}
             />
           )}
           {staged.map((f, i) => (
@@ -1416,6 +1436,17 @@ export default function Page() {
 
   return (
     <div className="h-dvh w-screen overflow-hidden antialiased text-slate-800 selection:bg-brand-100 selection:text-brand-700">
+      {welcome && (
+        <WelcomeModal
+          key={`${welcome.intro}-${welcome.group || "basic"}-${welcome.startKey || "start"}`}
+          values={info}
+          onSet={setInfo}
+          onClose={closeWelcome}
+          startKey={welcome.startKey}
+          intro={welcome.intro}
+          startGroup={welcome.group}
+        />
+      )}
       <AgentOverlay
         active={agentActive}
         paused={agentPaused}
