@@ -11,12 +11,12 @@ const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace
 
 export function buildIcs(events: IcsEvent[]) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//GongGoPass//KO", "CALSCALE:GREGORIAN"];
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//BanryeZero//KO", "CALSCALE:GREGORIAN"];
   events.forEach((e, i) => {
     const next = new Date(e.date.getFullYear(), e.date.getMonth(), e.date.getDate() + 1);
     lines.push(
       "BEGIN:VEVENT",
-      `UID:${ymd(e.date)}-${i}-${Date.now()}@gonggopass`,
+      `UID:${ymd(e.date)}-${i}-${Date.now()}@banryezero`,
       `DTSTAMP:${stamp}`,
       `DTSTART;VALUE=DATE:${ymd(e.date)}`,
       `DTEND;VALUE=DATE:${ymd(next)}`,

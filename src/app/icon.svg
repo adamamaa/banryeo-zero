@@ -1,1 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#2558D9"/><path d="M9.5 16.5l4.5 4.5 8.5-9.5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <!-- 제로(0) 블루 링 -->
+  <circle cx="100" cy="100" r="82" fill="#1652A8" stroke="#0F294A" stroke-width="8" />
+  <circle cx="100" cy="100" r="58" fill="#FFFFFF" stroke="#0F294A" stroke-width="8" />
+
+  <!-- 중앙 서류 아이콘 -->
+  <path d="M76 62H113L128 77V132C128 135.314 125.314 138 122 138H76C72.6863 138 70 135.314 70 132V68C70 64.6863 72.6863 62 76 62Z" fill="#FFFFFF" stroke="#0F294A" stroke-width="7" stroke-linejoin="round" />
+  <path d="M113 62V73C113 75.2091 114.791 77 117 77H128" stroke="#0F294A" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round" />
+  <line x1="82" y1="87" x2="104" y2="87" stroke="#0F294A" stroke-width="6.5" stroke-linecap="round" />
+  <line x1="82" y1="99" x2="116" y2="99" stroke="#0F294A" stroke-width="6.5" stroke-linecap="round" />
+
+  <!-- 통과(체크) 심볼 -->
+  <path d="M61 99L92 123L169 30L179 39L94 143L51 110L61 99Z" fill="#24C86A" stroke="#0F294A" stroke-width="7" stroke-linejoin="round" />
+</svg>

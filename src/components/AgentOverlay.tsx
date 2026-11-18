@@ -343,7 +343,7 @@ export function AgentOverlay({
             </svg>
             <span className="ml-4 -mt-1 inline-flex items-center gap-1 rounded-full bg-purple-700 px-2 py-0.5 text-[10px] font-semibold text-white shadow-md whitespace-nowrap">
               <Sparkles className="h-2.5 w-2.5" />
-              공고패스 AI
+              반려제로 AI
             </span>
           </div>
         </>

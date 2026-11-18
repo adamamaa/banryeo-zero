@@ -213,7 +213,7 @@ export function SidebarRecs({
       for (const e of events) {
         if (diff(e.date, now) > 0 || seen.has(e.id)) continue;
         try {
-          new Notification(`공고패스 · ${e.title}`, { body: e.desc, tag: e.id });
+          new Notification(`반려제로 · ${e.title}`, { body: e.desc, tag: e.id });
         } catch {
           // 알림을 띄울 수 없는 환경
         }
@@ -243,8 +243,8 @@ export function SidebarRecs({
 
   const exportAll = () =>
     downloadIcs(
-      "공고패스_알림.ics",
-      events.map((e) => ({ date: e.date, title: `공고패스 · ${e.title}`, desc: e.desc }))
+      "반려제로_알림.ics",
+      events.map((e) => ({ date: e.date, title: `반려제로 · ${e.title}`, desc: e.desc }))
     );
 
   const period = (n: Gov24Notice) => {

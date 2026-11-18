@@ -668,7 +668,7 @@ export function WelcomeModal({
             >
               <X className="h-4 w-4" />
             </button>
-            <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">공고패스에 오신 걸 환영해요</h2>
+            <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">반려제로에 오신 걸 환영해요</h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-500">
               몇 가지만 알려 주시면 받을 수 있는 지원금과
               <br />
@@ -737,7 +737,7 @@ export function WelcomeModal({
               onClick={onClose}
               className="mt-7 w-full rounded-2xl bg-purple-600 py-3.5 text-[15px] font-semibold text-white shadow-sm shadow-purple-500/30 transition-colors hover:bg-purple-700"
             >
-              공고패스 시작하기
+              반려제로 시작하기
             </button>
             {filled.length > 0 && <p className="mt-2 text-[11px] text-slate-400">입력창 위 태그를 누르면 언제든 고칠 수 있어요.</p>}
           </div>

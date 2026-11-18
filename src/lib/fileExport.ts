@@ -140,7 +140,7 @@ export function normalizeFile(
         .replace(/[\\/:*?"<>|]/g, "_")
         .replace(/\.(xlsx?|csv|docx?|txt|ics|pdf|hwpx?|pptx?)$/i, "")
         .trim()
-        .slice(0, 60) || "공고패스_자료",
+        .slice(0, 60) || "반려제로_자료",
     description: text(args.description, 80),
     sheets: format === "csv" ? sheets.slice(0, 1) : format === "ics" ? [] : sheets,
     content: format === "docx" || format === "txt" ? content : "",

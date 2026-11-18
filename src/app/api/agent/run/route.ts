@@ -414,7 +414,7 @@ export async function POST(req: NextRequest) {
       const history = (Array.isArray(body.history) ? body.history : [])
         .slice(-8)
         .map((m: { role?: string; content?: unknown }) =>
-          `${m.role === "user" ? "사용자" : "공고패스"}: ${maskPii(String(m.content || "").slice(0, 1500)).masked}`
+          `${m.role === "user" ? "사용자" : "반려제로"}: ${maskPii(String(m.content || "").slice(0, 1500)).masked}`
         )
         .join("\n");
 
@@ -588,7 +588,7 @@ export async function POST(req: NextRequest) {
           systemInstruction: {
             parts: [
               {
-                text: `당신은 청년 정책과 지원금 신청을 돕는 에이전트 '공고패스'입니다. 정책 상담이 중심이지만 사용자가 맡기는 다른 일(글쓰기, 번역, 요약, 표 정리, 파일 만들기 등)도 직접 끝까지 처리합니다. 사용자가 다른 언어를 지정하지 않으면 한국어로 간결하게 답하세요.
+                text: `당신은 청년 정책과 지원금 신청을 돕는 에이전트 '반려제로'입니다. 정책 상담이 중심이지만 사용자가 맡기는 다른 일(글쓰기, 번역, 요약, 표 정리, 파일 만들기 등)도 직접 끝까지 처리합니다. 사용자가 다른 언어를 지정하지 않으면 한국어로 간결하게 답하세요.
 - 실제 신청 전에는 공식 공고를 확인하라고 안내하세요.
 - 정책의 자격, 금액, 기한, 신청 방법은 검색으로 확인한 뒤 답하세요. 검색할 때 [등록된 사이트]의 도메인을 먼저 살펴보세요.
 - [계산·조회 결과]가 있으면 그 수치만 쓰고 새로 만들지 마세요.

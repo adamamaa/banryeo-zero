@@ -1172,7 +1172,7 @@ export default function Page() {
   const downloadPackage = () => {
     if (!uploadAudit) return;
     const lines = [
-      `[공고패스] 제출 전 점검 요약`,
+      `[반려제로] 제출 전 점검 요약`,
       `점검 서류: 업로드 서류 · 반려 위험 ${uploadRisks}건`,
       `※ 사전 점검 결과이며 최종 판정은 접수 기관이 합니다.`,
       ``,
@@ -1186,7 +1186,7 @@ export default function Page() {
     const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = "공고패스_서류점검요약.txt";
+    a.download = "반려제로_서류점검요약.txt";
     a.click();
     URL.revokeObjectURL(url);
     setDownloaded(true);
@@ -1324,12 +1324,10 @@ export default function Page() {
             <div className="flex flex-col space-y-4">
               <div className="flex items-center justify-between px-1.5 pt-1">
                 <div className="flex items-center space-x-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-purple-200/70 flex items-center justify-center text-purple-700 shadow-sm">
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M11 2a2 2 0 0 1 2 2v6h6a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-6v6a2 2 0 0 1-2 2v0a2 2 0 0 1-2-2v-6H3a2 2 0 0 1-2-2v0a2 2 0 0 1 2-2h6V4a2 2 0 0 1 2-2v0z" />
-                    </svg>
-                  </div>
-                  <span className="font-semibold text-[17px] tracking-tight text-slate-900">공고패스</span>
+                  {/* 파비콘과 같은 파일을 로고로 쓴다 */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/icon.svg" alt="" width={32} height={32} className="h-8 w-8 shrink-0" />
+                  <span className="font-semibold text-[17px] tracking-tight text-slate-900">반려제로</span>
                 </div>
                 <button
                   aria-label="사이드바 닫기"
@@ -3488,7 +3486,7 @@ function PolicyPackage({
 
   const download = () => {
     const content = [
-      `[공고패스] ${p.name} 신청 준비 요약`,
+      `[반려제로] ${p.name} 신청 준비 요약`,
       p.benefit && `지원 내용: ${p.benefit}`,
       p.deadline && `기한: ${p.deadline}`,
       p.applyAt && `신청처: ${p.applyAt}`,
@@ -3513,7 +3511,7 @@ function PolicyPackage({
     const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `공고패스_${p.name.replace(/\s+/g, "_")}_신청준비.txt`;
+    a.download = `반려제로_${p.name.replace(/\s+/g, "_")}_신청준비.txt`;
     a.click();
     URL.revokeObjectURL(url);
     setSaved(true);
@@ -3641,7 +3639,7 @@ function ActionOutputs({ msg, onUpdate }: { msg: Message; onUpdate: (p: Partial<
     const url = URL.createObjectURL(new Blob([draft.text], { type: "text/plain;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `공고패스_${(draft.policyName || "정책").replace(/\s+/g, "_")}_${draft.title.replace(/\s+/g, "_")}.txt`;
+    a.download = `반려제로_${(draft.policyName || "정책").replace(/\s+/g, "_")}_${draft.title.replace(/\s+/g, "_")}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
