@@ -9,6 +9,8 @@ import { recommendGov24, type Gov24Notice } from "@/lib/gov24";
 import { recommendYouth } from "@/lib/youthcenter";
 import { recommendWelfare } from "@/lib/welfare";
 import { resolveAlternatives } from "@/lib/alternatives";
+import { downloadName, fileMeta } from "@/lib/fileExport";
+import { applyOfficial } from "@/lib/officialFacts";
 
 interface UploadedDoc {
   fileName: string;
@@ -488,7 +490,7 @@ export async function POST(req: NextRequest) {
         progress(
           1,
           agentMode
-            ? "AI가 쓸 도구(웹 검색 · 자격 계산 · 보조금24 · 서류 대조 · 되묻기)를 준비합니다."
+            ? "AI가 쓸 도구(웹 검색 · 공고 조회 · 자격 계산 · 서류 대조 · 파일 만들기)를 준비합니다."
             : rentCase
             ? "입력 조건으로 1인 가구 중위소득 비율과 보증금 환산 월세를 계산합니다."
             : "등록된 정부 사이트와 보조금24 지원사업 정보를 조회하고 있습니다."
@@ -666,7 +668,7 @@ export async function POST(req: NextRequest) {
           systemInstruction: {
             parts: [
               {
-                text: `당신은 청년 정책과 지원금 신청을 돕는 상담 도우미 '공고패스'입니다. 한국어로 간결하게 답하세요.
+                text: `당신은 청년 정책과 지원금 신청을 돕는 에이전트 '공고패스'입니다. 정책 상담이 중심이지만 사용자가 맡기는 다른 일(글쓰기, 번역, 요약, 표 정리, 파일 만들기 등)도 직접 끝까지 처리합니다. 사용자가 다른 언어를 지정하지 않으면 한국어로 간결하게 답하세요.
 - 검색 결과가 [계산·조회 결과]의 시연용 공고 기준과 다르면 둘을 나란히 밝히고, 실제 신청 전에는 공식 공고를 확인하라고 안내하세요.
 - 정책의 자격, 금액, 기한, 신청 방법은 검색으로 확인한 뒤 답하세요. 검색할 때 [등록된 사이트]의 도메인을 먼저 살펴보세요.
 - [계산·조회 결과]가 있으면 그 수치만 쓰고 새로 만들지 마세요. source가 "sample"인 결과는 시연용 예시 데이터라고 밝히세요.
@@ -675,8 +677,7 @@ export async function POST(req: NextRequest) {
 - 확인하지 못한 내용은 추측하지 말고 "확인하지 못했습니다"라고 한 뒤, 확인할 수 있는 사이트를 안내하세요.
 - "100% 통과" 같은 확정 표현을 쓰지 말고, 최종 판정은 접수 기관이 한다고 안내하세요.
 - 서류 발급이나 신청 방법은 단계로 설명하고, [등록된 사이트] 중 관련 있는 곳의 이름과 주소를 그대로 안내하세요. 주소를 지어내지 마세요.
-- 청년 정책과 관련 없는 질문에도 아는 범위에서 짧게 답하세요.
-- 사용자는 긴 글을 읽지 않습니다. 핵심만 짧은 구절로 쓰세요.
+- 상담 답변은 핵심만 짧은 구절로 쓰세요. 사용자가 글·번역·표 같은 결과물을 요청했다면 줄이지 말고 body에 전체를 쓰세요.
 - 공식 출처(정부·공공기관 .go.kr, .or.kr의 공고와 안내 페이지)를 블로그·뉴스보다 우선하세요. 출처끼리 다르면 가장 최근 공식 공고를 따르고, 정책마다 asOf에 기준 시점과 출처를 쓰세요.
 - [이전에 안내한 정책 정보]에 있는 정책을 다시 다루면 같은 수치와 조건을 그대로 쓰세요. 최신 공식 출처가 분명히 다를 때만 바꾸고, caution에 "이전 안내와 달라짐: 무엇이"를 쓰세요.
 - 검색 결과에 명시된 공식 공고문 출처와 기준 연도를 asOf에 함께 쓰고, 확인되지 않은 내용은 추측하지 마세요.
@@ -706,6 +707,7 @@ ${CARD_FORMAT}`,
             baseSteps: labels,
             signal: req.signal,
             hosts: sites.map((s) => s.host),
+            question,
             yk: String(process.env.YOUTHCENTER_API_KEY || "").trim(),
             profile: {
               sido: text(up.sido),
@@ -721,6 +723,11 @@ ${CARD_FORMAT}`,
             },
           });
           for (const t of out.traces) traces.push({ ...t, step: traces.length + 1 });
+          // 다음 질문에서 AI가 어떤 파일을 만들었는지 알 수 있게 답변 글에 남긴다
+          const fileNote =
+            out.ok && out.files?.length
+              ? `\n만든 파일: ${out.files.map((f) => `${downloadName(f)} (${fileMeta(f)})`).join(", ")}`
+              : "";
           if (out.ok && out.ask) {
             return {
               status: 200,
@@ -732,6 +739,7 @@ ${CARD_FORMAT}`,
                 ask: out.ask,
                 draft: out.draft,
                 checklist: out.checklist,
+                files: out.files,
                 plan: out.plan,
                 reply: `${out.ask.question}${out.ask.reason ? `\n\n필요한 이유: ${out.ask.reason}` : ""}`,
                 toolExecutions: traces,
@@ -743,7 +751,9 @@ ${CARD_FORMAT}`,
           if (out.ok) {
             // 대안의 이름·링크·기한은 실제 공고 원본으로 맞춘다
             const parsed = parseCard(out.text, sites);
-            const card = parsed && resolveAlternatives(parsed, out.alternatives || [], out.summary?.verdict === "ineligible");
+            const card =
+              parsed &&
+              applyOfficial(resolveAlternatives(parsed, out.alternatives || [], out.summary?.verdict === "ineligible"), out.official || []);
             const cited = out.sources
               .filter((s, i) => out.sources.findIndex((x) => x.title === s.title) === i)
               .map((s) => ({ ...s, registered: sites.some((x) => s.title.includes(x.host) || s.url.includes(x.host)) }));
@@ -755,7 +765,7 @@ ${CARD_FORMAT}`,
                 agent: true,
                 grounded: true,
                 reasoning,
-                reply: card ? cardToText(card) : out.text,
+                reply: `${card ? cardToText(card) : out.text}${fileNote}`,
                 card,
                 toolExecutions: traces,
                 summary: out.summary,
@@ -763,6 +773,7 @@ ${CARD_FORMAT}`,
                 ...(out.audit && { auditResult: out.audit.result, auditPolicy: out.audit.policy }),
                 draft: out.draft,
                 checklist: out.checklist,
+                files: out.files,
                 verification: out.verification,
                 plan: out.plan,
               },

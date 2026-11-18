@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronDown, LoaderCircle, Sparkles } from "lucide-react";
 
 export interface AgentPlanStep {
@@ -28,11 +28,14 @@ export function AgentPlanCard({
   paused,
   steps,
   thought,
+  onGrow,
 }: {
   paused: boolean;
   steps: AgentPlanStep[];
   thought: string;
   onTogglePause?: () => void;
+  // 단계나 글이 바뀌어 카드 높이가 달라졌을 때 (채팅이 맨 아래를 따라가게 한다)
+  onGrow?: () => void;
 }) {
   const [typed, setTyped] = useState("");
   const prevThoughtRef = useRef("");
@@ -73,6 +76,11 @@ export function AgentPlanCard({
   };
   const current = steps.find((s) => s.status === "active") || steps.filter((s) => s.status === "done").pop();
   const doneCount = steps.filter((s) => s.status === "done").length;
+
+  useLayoutEffect(() => {
+    onGrow?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steps, typed, collapsed]);
 
   return (
     <div className="w-full max-w-[460px] animate-fade-up rounded-2xl border border-purple-200/90 bg-white/95 p-3 shadow-[0_10px_28px_-14px_rgba(109,40,217,0.22)]">

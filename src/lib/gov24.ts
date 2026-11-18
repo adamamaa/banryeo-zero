@@ -2,6 +2,8 @@
 // 목록(serviceList)으로 내 지역·관심 분야 공고를 찾고, 상세(serviceDetail)에서 신청기한·구비서류를 가져온다.
 // 키는 서버 환경변수 PUBLIC_DATA_API_KEY (공공데이터포털 일반 인증키)를 쓴다. 키가 없으면 조회하지 않는다.
 
+import { ymdOf, type OfficialRecord } from "./officialFacts";
+
 const BASE = "https://api.odcloud.kr/api/gov24/v3";
 
 export interface Gov24Notice {
@@ -123,7 +125,7 @@ const INTEREST_KEYWORD: Record<string, string> = {
   "건강·심리": "심리",
 };
 
-const SIDO_FULL: Record<string, string[]> = {
+export const SIDO_FULL: Record<string, string[]> = {
   서울: ["서울특별시"],
   부산: ["부산광역시"],
   대구: ["대구광역시"],
@@ -172,11 +174,27 @@ const GROUP_ONLY: [RegExp, string[]][] = [
   [/국가유공|보훈/, ["국가유공자 가족"]],
 ];
 
+// 공식 원문 확인: 정책 이름으로 찾아 지원 내용과 수정일을 그대로 돌려준다
+export async function officialGov24(key: string, name: string): Promise<Omit<OfficialRecord, "query" | "exact">[]> {
+  const rows = await call("serviceList", key, { perPage: "10", "cond[서비스명::LIKE]": name });
+  return rows.map((r) => ({
+    source: "보조금24",
+    name: s(r["서비스명"], 60),
+    org: s(r["소관기관명"], 40),
+    updated: ymdOf(s(r["수정일시"], 20)),
+    benefit: s(r["지원내용"], 700),
+    target: s(r["지원대상"], 300),
+    deadline: s(r["신청기한"], 80),
+    url: https(r["상세조회URL"]),
+  }));
+}
+
 // 대안 찾기: 서비스명 키워드 검색 → 내 시군구·시도·중앙부처 사업만 남긴다
 export async function searchGov24(
   key: string,
   q: { sido?: string; sigungu?: string; special?: string[] },
-  keywords: string[]
+  keywords: string[],
+  limit = 6
 ): Promise<Gov24Notice[]> {
   const results = await Promise.allSettled(
     keywords.map((kw) => call("serviceList", key, { perPage: "30", "cond[서비스명::LIKE]": kw }))
@@ -201,7 +219,7 @@ export async function searchGov24(
     .sort((a, b) => rank(a) - rank(b))
     .map((r) => toNotice(r))
     .filter((n) => n.id && n.name && (!n.applyEnd || n.applyEnd >= today))
-    .slice(0, 6);
+    .slice(0, limit);
 }
 
 export async function recommendGov24(

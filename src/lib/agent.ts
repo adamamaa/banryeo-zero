@@ -1,13 +1,15 @@
 // 도구 호출 에이전트 루프.
 // AI(Gemini)가 질문을 보고 어떤 도구를 쓸지 스스로 고르고, 서버가 실행한 결과를 다시 AI에 돌려준다.
 // 검색(google_search)은 Gemini 서버에서 실행되고, 나머지 도구는 이 파일에서 실행한다.
-import { callGemini, geminiError, maskPii, type WebSource } from "./gemini";
+import { callGemini, geminiError, groundSources, maskPii, type WebSource } from "./gemini";
 import { judgeEligibility, MEDIAN_INCOME_2026, estimateNhisFee, medianRatioPercent } from "./standards";
 import { fetchGov24Services, type ToolExecution } from "./tools";
 import type { AuditResult } from "./docRules";
-import type { PolicyDetail } from "./card";
+import { parseCard, type PolicyDetail } from "./card";
 import { verifyAnswer, type Verification } from "./verify";
-import { findAlternatives, type AltCandidate, type AltProfile } from "./alternatives";
+import { findAlternatives, lookupOfficial, searchNotices, type AltCandidate, type AltProfile } from "./alternatives";
+import { cleanPolicyName, pickOfficial, policyNamesIn, type OfficialRecord } from "./officialFacts";
+import { FILE_FORMATS, downloadName, fileMeta, normalizeFile, type GeneratedFile } from "./fileExport";
 
 export interface EligibilitySummary {
   medianRatioPercent: number;
@@ -60,6 +62,8 @@ export interface AgentInput {
   // 대안 찾기에 쓰는 온통청년 키와 내 정보
   yk?: string;
   profile?: AltProfile;
+  // 파일 요청을 말로만 넘기지 않았는지 검증할 때 쓰는 원래 질문
+  question?: string;
 }
 
 export type AgentOutput =
@@ -76,6 +80,8 @@ export type AgentOutput =
       verification?: Verification;
       plan?: PlanStep[];
       alternatives?: AltCandidate[];
+      files?: GeneratedFile[];
+      official?: OfficialRecord[];
     }
   | { ok: false; error: string; traces: ToolExecution[] };
 
@@ -86,10 +92,13 @@ const PLAN_TOOLS = [
   "google_search",
   "calculate_eligibility",
   "lookup_subsidy_list",
+  "check_policy",
+  "search_policies",
   "find_alternatives",
   "audit_documents",
   "create_draft",
   "create_checklist",
+  "create_file",
   "ask_user",
   "answer",
 ];
@@ -229,9 +238,92 @@ const DECLARATIONS = [
     },
   },
   {
+    name: "check_policy",
+    description:
+      "정책 이름으로 보조금24·온통청년의 공식 원문(지원 내용, 대상, 신청 기한, 최근 수정일)을 가져온다. 특정 정책의 금액·대상·기한을 답하기 전에 호출한다. 웹 검색보다 이 원문을 우선한다.",
+    parameters: {
+      type: "object",
+      properties: {
+        names: { type: "array", items: { type: "string" }, description: "정확한 정책 이름 1~3개 (예: 국민취업지원제도)" },
+      },
+      required: ["names"],
+    },
+  },
+  {
+    name: "search_policies",
+    description:
+      "온통청년·복지로·보조금24 실시간 공고에서 사용자의 지역·나이·취업 상태에 맞는 공고를 최대 30개 가져온다. 공고 목록·비교표·마감 일정을 만들거나 '내가 받을 수 있는 공고'를 물을 때 쓴다. keywords를 비우면 내 조건 기준 추천 공고를 가져온다.",
+    parameters: {
+      type: "object",
+      properties: {
+        keywords: {
+          type: "array",
+          items: { type: "string" },
+          description: "공고 이름에 들어갈 짧은 단어 0~4개 (예: 월세, 취업, 자격증). 특정 분야가 없으면 비운다",
+        },
+        special: {
+          type: "array",
+          items: { type: "string" },
+          description: "대화에서 사용자가 밝힌 해당 조건: 기초생활수급, 차상위계층, 한부모 가정, 장애인, 자립준비청년, 다문화 가정, 국가유공자 가족 중에서",
+        },
+      },
+    },
+  },
+  {
+    name: "create_file",
+    description:
+      "사용자가 내려받을 파일을 만든다. xlsx(엑셀 표), csv(표 데이터), docx(워드 문서), txt(글), ics(캘린더 일정). 표는 sheets, 글은 content, 일정은 events에 넣는다. search_policies·find_alternatives로 찾은 공고는 noticeRefs로 넣으면 서버가 원본으로 표를 채운다. 파일이 여러 개 필요하면 여러 번 호출한다.",
+    parameters: {
+      type: "object",
+      properties: {
+        format: { type: "string", enum: FILE_FORMATS, description: "파일 형식" },
+        fileName: { type: "string", description: "확장자를 뺀 파일 이름 (예: 청년지원_공고목록)" },
+        description: { type: "string", description: "파일 설명 (30자 이내)" },
+        sheets: {
+          type: "array",
+          description: "표. xlsx는 시트별로, docx·txt에서는 본문 뒤의 표로 들어간다",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "시트 이름" },
+              columns: { type: "array", items: { type: "string" }, description: "열 이름. 금액은 단위를 여기에 쓴다 (예: 금액(원))" },
+              rows: {
+                type: "array",
+                items: { type: "array", items: { type: "string" } },
+                description: "행 목록. 각 행은 columns 순서의 값. 숫자 칸에는 숫자만 쓴다",
+              },
+              sumColumns: { type: "array", items: { type: "string" }, description: "맨 아래 합계를 낼 열 이름. 직접 더하지 말고 여기에 넣는다" },
+            },
+            required: ["name", "columns", "rows"],
+          },
+        },
+        content: { type: "string", description: "docx·txt 본문. # 제목, ## 소제목, - 목록, | 표 | 를 쓸 수 있다" },
+        events: {
+          type: "array",
+          description: "ics 일정",
+          items: {
+            type: "object",
+            properties: {
+              date: { type: "string", description: "YYYY-MM-DD" },
+              title: { type: "string" },
+              note: { type: "string" },
+            },
+            required: ["date", "title"],
+          },
+        },
+        noticeRefs: {
+          type: "array",
+          items: { type: "string" },
+          description: "파일에 넣을 공고의 ref 목록. 찾은 공고 전부면 [\"all\"]",
+        },
+      },
+      required: ["format", "fileName"],
+    },
+  },
+  {
     name: "ask_user",
     description:
-      "자격 판정이나 서류 검수에 꼭 필요한 정보가 없을 때 사용자에게 한 가지를 되묻는다. 이 도구를 부르면 대화가 사용자 답을 기다린다. 검색으로 알 수 있는 것은 묻지 않는다.",
+      "자격 판정이나 서류 검수, 결과가 완전히 달라지는 작업에 꼭 필요한 정보가 없을 때 사용자에게 한 가지를 되묻는다. 이 도구를 부르면 대화가 사용자 답을 기다린다. 검색으로 알 수 있는 것은 묻지 않는다.",
     parameters: {
       type: "object",
       properties: {
@@ -257,11 +349,21 @@ const AGENT_RULES = `
 - 도구 결과에 "추가로필요한정보"가 있으면 최종 답을 내지 말고 바로 ask_user로 그 정보를 물으세요. "확인 필요"를 신청 단계나 주의 문구로 미루지 마세요.
 - 사용자 정보의 값이 0이면 0으로 계산하세요. 값이 아예 없을 때만 묻습니다.
 - 도구 결과의 수치를 그대로 쓰고, 도구 결과와 검색 결과가 다르면 둘 다 밝히세요.
+- 특정 정책의 금액·대상·기한을 말하기 전에 check_policy로 공식 원문을 확인하세요. 기록이 여러 개면 최근 수정된 원문을 따르고, 답변에서 다룬 정책은 policies에 넣으세요. 원문이 없을 때만 google_search 결과를 쓰세요.
 - 검수에서 끝내지 말고 실행까지 이어 주세요: audit_documents를 썼다면 create_checklist로 제출 직전 체크리스트를 만들고, 보완에 설명이 필요하면(주소 불일치, 서류 지연 등) create_draft로 소명서·사유서 초안을 쓰세요.
 - 사용자가 사유서·자기소개서·계획서 작성을 원하면 create_draft, 신청 준비·제출 방법을 물으면 create_checklist를 쓰세요.
 - 안 된다는 결론(자격 미달, 대상 제외, 마감, 예산 소진)에서 멈추지 마세요. 왜 안 되는지 밝히고, 사용자가 진짜 이루려던 목적을 정한 뒤 find_alternatives를 호출하세요. 전국 제도까지 확인이 필요하면 google_search도 쓰세요.
 - 대안은 사용자 조건에 맞는 것만 alternatives에 최대 3개 넣으세요. find_alternatives 결과는 ref를 그대로 쓰고, 조건이 확실하지 않으면 why에 확인할 점을 쓰세요. 없는 공고를 지어내지 마세요.
 - 대안을 찾았다면 summary에 "안 되는 이유 + 대신 쓸 수 있는 길"을 함께 쓰세요. 찾아봐도 없으면 찾지 못했다고 밝히고 확인할 곳을 안내하세요.
+
+[요청 처리 범위]
+- 정책 질문이 아니어도 거절하지 말고 직접 처리하세요. 글·메일·번역·요약·비교표·계획표는 결과물 전체를 body에 쓰고, summary에는 무엇을 했는지 한 줄로 쓰세요.
+- 파일을 달라고 하면 설명만 하지 말고 create_file을 호출하세요. 표·목록·예산은 xlsx, 문서는 docx, 일정은 ics가 기본입니다. 파일 내용을 body에 다시 쓰지 마세요.
+- PDF·한글(hwp)·PPT 파일은 만들 수 없습니다. 내용을 docx로 만들고, 그 형식으로는 못 만들어 Word 파일로 만들었으며 한글·Word에서 열어 다른 형식으로 저장할 수 있다고 summary나 caution에 밝히세요.
+- 공고 목록이나 공고 비교가 필요하면 search_policies로 실제 공고를 찾고, 파일에는 noticeRefs로 넣으세요. 공고 내용을 직접 옮겨 적지 마세요.
+- 표와 문서의 사실·금액·날짜는 사용자 정보, 도구, 검색으로 확인한 값만 쓰세요. 모르는 칸은 "확인 필요"로 두고, 예시 값을 넣었으면 caution에 예시라고 밝히세요.
+- 정보가 조금 모자라면 되묻기보다 합리적인 가정으로 먼저 만들고 그 가정을 caution에 쓰세요. 결과가 완전히 달라질 때만 ask_user를 쓰세요.
+- 실제로 할 수 없는 일(대신 신청·제출, 로그인, 메일 발송, 결제, 전화)은 할 수 없다고 짧게 밝히고, 사용자가 바로 쓸 결과물(초안, 체크리스트, 일정 파일)을 만들어 주세요.
 - 도구를 다 쓴 뒤에는 위에서 정한 JSON 형식으로만 최종 답을 출력하세요.`;
 
 const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : Number(v));
@@ -282,6 +384,24 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
   // 대안 찾기 결과 (여러 번 찾으면 합친다)
   let altSearched = false;
   const alternatives: AltCandidate[] = [];
+  // 이번 답변에서 조회한 공고 전체 (파일에 넣을 때 원본으로 쓴다)
+  const notices: AltCandidate[] = [];
+  const remember = (list: AltCandidate[]) => {
+    for (const c of list) if (!notices.some((x) => x.ref === c.ref)) notices.push(c);
+  };
+  const files: GeneratedFile[] = [];
+  let usedSearch = false;
+  // 정책별 공식 원문 (같은 답변에서 다시 조회하지 않는다)
+  const official = new Map<string, OfficialRecord[]>();
+  const loadOfficial = (names: string[]) =>
+    Promise.all(
+      names
+        .filter((name) => !official.has(name))
+        .map(async (name) => {
+          official.set(name, await lookupOfficial({ pk: input.pk, yk: input.yk }, name, input.profile?.sido));
+        })
+    );
+  const officialRecords = () => Array.from(official.values()).flat();
   // AI가 처음에 세운 계획. 도구를 실행할 때마다 해당 단계를 체크한다
   let plan: PlanStep[] = [];
   const markPlan = (tool: string) => {
@@ -360,6 +480,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
     for (const p of parts) {
       if (p.toolCall?.toolType === "GOOGLE_SEARCH_WEB") {
         const queries = strs(p.toolCall.args?.queries, 4);
+        usedSearch = true;
         step("google_search", `웹 검색: ${queries[0] || "최신 공고"}`);
         addTrace({
           toolName: "google_search",
@@ -389,8 +510,19 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
       if (!text) return { ok: false, error: "AI가 빈 답을 보냈습니다.", traces };
 
       // 답변 검증: 수치·판정은 도구 결과와, 날짜는 오늘과, 링크는 공식 도메인과 대조한다
-      show("답변의 수치·판정·날짜·링크를 도구 결과와 대조하고 있습니다.", "verify");
-      const checks = verifyAnswer(text, { summary, hosts: input.hosts, alternativesSearched: altSearched, alternatives });
+      show("답변의 수치·판정·날짜·링크를 도구 결과와 공식 원문에 대조하고 있습니다.", "verify");
+      // AI가 확인하지 않은 정책도 서버가 공식 원문을 찾아 대조한다
+      const answerCard = parseCard(text);
+      if (answerCard) await loadOfficial(policyNamesIn(answerCard));
+      const checks = verifyAnswer(text, {
+        summary,
+        hosts: input.hosts,
+        alternativesSearched: altSearched,
+        alternatives,
+        question: input.question,
+        fileCount: files.length,
+        official: officialRecords(),
+      });
       const fixes = checks.filter((c) => !c.ok && c.severity === "fix");
       const passedCount = checks.filter((c) => c.ok).length;
       const verifyTrace = (title: string, status: "done" | "warn") =>
@@ -430,6 +562,19 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         `답변 검증 ${passedCount}/${checks.length} 통과${verifyRetried ? " · 1회 고쳐 씀" : ""}`,
         fixes.length ? "warn" : "done"
       );
+      // 출처: 공식 원문을 먼저 두고, 검색을 썼는데 출처가 없으면 답변 핵심을 다시 확인해 받는다
+      const records = officialRecords();
+      if (usedSearch && !sources.length && answerCard) {
+        show("답변의 근거 출처를 확인하고 있습니다.", "verify");
+        const brief = [answerCard.summary, ...answerCard.facts.map((f) => `${f.label}: ${f.value}`)].join(" / ");
+        sources.push(...(await groundSources(key, input.question || "", brief)));
+      }
+      const officialSources: WebSource[] = pickOfficial(records)
+        .filter((r) => /^https:\/\//.test(r.url))
+        .map((r) => ({ title: `${r.source}: ${r.name} (${r.updated} 수정)`.slice(0, 80), url: r.url }));
+      const allSources = [...officialSources, ...sources].filter(
+        (s, i, all) => all.findIndex((x) => x.url === s.url) === i
+      );
       show(
         fixes.length ? `검증 경고 ${fixes.length}건을 표시하고 답변을 보냅니다.` : "도구 결과와 대조해 검증을 마쳤습니다.",
         "done"
@@ -437,7 +582,8 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
       return {
         ok: true,
         text,
-        sources: sources.slice(0, 8),
+        sources: allSources.slice(0, 8),
+        official: records,
         traces,
         summary,
         audit,
@@ -446,6 +592,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         verification,
         plan: plan.length ? plan.map((x) => ({ ...x })) : undefined,
         alternatives,
+        files,
       };
     }
 
@@ -496,6 +643,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
             const found = await findAlternatives({ pk: input.pk, yk: input.yk }, profile, { keywords, exclude: blocked });
             altSearched = true;
             for (const c of found.candidates) if (!alternatives.some((x) => x.ref === c.ref)) alternatives.push(c);
+            remember(found.candidates);
             response = {
               조회한곳: found.searched,
               찾은수: found.candidates.length,
@@ -525,6 +673,107 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           } catch {
             response = { error: "실시간 공고 조회에 실패했습니다. google_search로 대안을 확인하세요." };
           }
+        }
+      } else if (name === "check_policy") {
+        const names = strs(args.names, 3).map(cleanPolicyName).filter(Boolean);
+        step("check_policy", `공식 원문 확인: ${names[0] || "정책"}`);
+        show(`${names.join(", ") || "정책"}의 공식 원문을 확인하고 있습니다.`);
+        await loadOfficial(names);
+        const found = names.flatMap((x) => official.get(x) || []);
+        response = {
+          찾은수: found.length,
+          원문: found.map((r) => ({
+            이름: r.name,
+            기관: r.org,
+            출처: r.source,
+            최근수정: r.updated,
+            이름일치: r.exact,
+            지원내용: r.benefit,
+            대상: r.target.slice(0, 200),
+            신청기한: r.deadline,
+          })),
+          note: found.length
+            ? "이름이 일치하는 기록 중 최근 수정된 원문을 기준으로 쓰세요."
+            : "공식 원문을 찾지 못했습니다. google_search로 확인하고 공식 공고 확인이 필요하다고 밝히세요.",
+        };
+        addTrace({
+          toolName: "check_policy",
+          title: `공식 원문 확인: ${found.length}건`,
+          basis: "보조금24 · 온통청년",
+          source: "live",
+          input: { 정책: names.join(", ") || "-" },
+          output: found.length
+            ? Object.fromEntries(found.map((r, i) => [`${i + 1}`, `${r.name} (${r.source}, ${r.updated} 수정)`]))
+            : { 결과: "공식 원문 없음" },
+          status: found.length ? "done" : "warn",
+        });
+      } else if (name === "search_policies") {
+        const keywords = strs(args.keywords, 4).map((k) => k.trim().slice(0, 15)).filter(Boolean);
+        step("search_policies", `공고 찾기: ${keywords.join(", ") || "내 조건 추천"}`);
+        show(`${keywords.length ? `'${keywords.join(", ")}' 공고를` : "내 조건에 맞는 공고를"} 실시간으로 찾고 있습니다.`);
+        const profile: AltProfile = {
+          ...input.profile,
+          special: Array.from(new Set([...(input.profile?.special || []), ...strs(args.special)])),
+        };
+        try {
+          const found = await searchNotices({ pk: input.pk, yk: input.yk }, profile, keywords);
+          remember(found.candidates);
+          response = {
+            조회한곳: found.searched,
+            찾은수: found.candidates.length,
+            공고: found.candidates.map((c) => ({
+              ref: c.ref,
+              이름: c.name,
+              기관: c.org,
+              내용: c.summary.slice(0, 80),
+              기한: c.applyEnd || c.deadlineText.slice(0, 30),
+            })),
+            note: found.candidates.length
+              ? "파일에 넣으려면 create_file의 noticeRefs에 ref를 넣으세요. 전부 넣으려면 [\"all\"]."
+              : "맞는 공고가 없습니다. 검색어를 바꾸거나 찾지 못했다고 밝히세요.",
+          };
+          addTrace({
+            toolName: "search_policies",
+            title: `공고 찾기: ${found.candidates.length}건`,
+            basis: found.searched.join(" · ") || "실시간 공고",
+            source: "live",
+            input: { 검색어: keywords.join(", ") || "내 조건 추천" },
+            output: found.candidates.length
+              ? Object.fromEntries(found.candidates.slice(0, 12).map((c, i) => [`${i + 1}`, `${c.name} (${c.org || "기관 미상"})`]))
+              : { 결과: "조건에 맞는 공고 없음" },
+            status: found.candidates.length ? "done" : "warn",
+          });
+        } catch {
+          response = { error: "실시간 공고 조회에 실패했습니다. google_search로 확인하세요." };
+        }
+      } else if (name === "create_file") {
+        const made = normalizeFile(args, notices, (t) => maskPii(t).masked);
+        if ("error" in made) {
+          response = { error: made.error };
+        } else {
+          const { file } = made;
+          const fullName = downloadName(file);
+          step("create_file", `파일 만들기: ${fullName}`);
+          show(`'${fullName}' 파일을 만들고 있습니다.`);
+          // 같은 이름으로 다시 만들면 새 파일로 바꾼다
+          const same = files.findIndex((f) => downloadName(f) === fullName);
+          if (same >= 0) files[same] = file;
+          else files.push(file);
+          response = {
+            saved: true,
+            파일: fullName,
+            내용: fileMeta(file),
+            note: "화면에 파일 이름과 다운로드 버튼이 표시됩니다. summary에는 무엇을 만들었는지 한 줄로 쓰고, facts·steps에 파일 이름이나 파일 내용을 반복하지 마세요.",
+          };
+          addTrace({
+            toolName: "create_file",
+            title: `파일 만들기: ${fullName}`,
+            basis: fileMeta(file),
+            source: "calc",
+            input: { 형식: file.format, 설명: file.description || "-" },
+            output: { 파일: fullName, 내용: fileMeta(file) },
+            status: "done",
+          });
         }
       } else if (name === "calculate_eligibility") {
         step("calculate_eligibility", "자격 요건 계산");
@@ -719,6 +968,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           checklist,
           ask,
           plan: plan.length ? plan.map((x) => ({ ...x })) : undefined,
+          files,
         };
       } else {
         response = { error: `알 수 없는 도구: ${name}` };

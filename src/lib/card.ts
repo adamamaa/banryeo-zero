@@ -34,6 +34,8 @@ export interface AnswerAlternative {
 
 export interface AnswerCard {
   summary: string;
+  // 글·번역·요약·표처럼 사용자가 요청한 결과물 전체
+  body?: string;
   facts: { label: string; value: string }[];
   steps: string[];
   links: { name: string; url: string }[];
@@ -52,6 +54,7 @@ export const isNegativeAnswer = (summary: string) =>
 export const CARD_FORMAT = `다른 글 없이 아래 JSON 객체 하나만 출력하세요. 모든 값은 짧은 한국어로 씁니다.
 {
   "summary": "질문에 대한 한 줄 답 (50자 이내, 핵심 수치 포함)",
+  "body": "사용자가 글·메일·번역·요약·비교표·계획 같은 결과물을 원할 때만 그 전체 내용. # 제목, - 목록, | 표 | 형식을 쓸 수 있음. 아니면 빈 문자열",
   "facts": [{ "label": "대상|금액|기간|신청처|소득기준 등 2~6자", "value": "25자 이내" }],
   "steps": ["신청 절차 한 단계 (20자 이내)"],
   "links": [{ "name": "사이트 이름", "url": "https://..." }],
@@ -80,7 +83,8 @@ facts·steps는 최대 4개, links·followUps·policies는 최대 3개, 정책�
 limits에는 숫자로 판정되는 자격 조건만 넣으세요: age는 만 나이, income은 본인 월 소득(만 원), medianRatio는 기준 중위소득 대비 %, sepMonths는 부모님과 따로 산 개월 수, deposit·rent는 보증금·월세(만 원). 가구 기준 조건이면 label에 "가구 기준"이라고 쓰세요. 숫자 조건이 없으면 빈 배열로 두세요.
 policies에는 답변에서 다룬 실제 정책만 넣고, 조건과 서류는 검색으로 확인한 것만 쓰세요. 정책을 다루지 않는 질문이면 빈 배열로 두세요. 해당 없는 항목은 빈 배열로 두세요.`;
 
-const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+// 카드의 짧은 항목은 글자 그대로 표시하므로 굵게 표시(**)를 뗀다
+const str = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\*\*/g, "").trim().slice(0, max) : "");
 const arr = (v: unknown): any[] => (Array.isArray(v) ? v : []); // eslint-disable-line @typescript-eslint/no-explicit-any
 
 // ponytail: 등록 사이트가 아닌 링크는 도메인 첫 화면으로 줄인다 (모델이 지어낸 세부 경로 404 방지).
@@ -149,6 +153,8 @@ export function parseCard(text: string, sites: { name: string; url: string; host
     .slice(0, 3);
   return {
     summary,
+    // 본문은 화면이 서식을 해석하므로 ** 를 그대로 둔다
+    body: (typeof raw.body === "string" && raw.body.trim().slice(0, 8000)) || undefined,
     facts: arr(raw.facts)
       .map((f) => ({ label: str(f?.label, 12), value: str(f?.value, 60) }))
       .filter((f) => f.label && f.value)
@@ -178,6 +184,7 @@ export function parseCard(text: string, sites: { name: string; url: string; host
 export const cardToText = (c: AnswerCard) =>
   [
     c.summary,
+    c.body,
     ...c.facts.map((f) => `- ${f.label}: ${f.value}`),
     ...c.steps.map((s, i) => `${i + 1}. ${s}`),
     ...c.links.map((l) => `- ${l.name}: ${l.url}`),

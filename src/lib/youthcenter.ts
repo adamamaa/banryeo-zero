@@ -4,6 +4,7 @@
 // 키는 서버 환경변수 YOUTHCENTER_API_KEY (온통청년 마이페이지 > OPEN API에서 발급)를 쓴다.
 import { splitDocs, type Gov24Notice } from "./gov24";
 import { mentionsOtherSigungu } from "@/data/regions";
+import { ymdOf, type OfficialRecord } from "./officialFacts";
 
 const ENDPOINT = "https://www.youthcenter.go.kr/go/ythip/getPlcy";
 
@@ -104,7 +105,7 @@ export function scorePolicy(r: Row, q: YouthQuery): number {
   const mine = q.special || [];
   for (const [re, group] of GROUP_ONLY) if (re.test(name) && !mine.includes(group)) return -1;
   const familyFree = q.marriage === "미혼" && (!q.children || q.children === "없음");
-  if (familyFree && /신혼부부|난임|임신|출산|산후/.test(name)) return -1;
+  if (familyFree && /신혼부부|결혼|난임|임신|출산|산후/.test(name)) return -1;
   let score = 0;
 
   // 지역: 코드 목록에 내 시도가 없으면 제외. 목록이 짧으면(지자체 사업) 가산점
@@ -212,8 +213,26 @@ async function loadPool(key: string): Promise<Row[]> {
   return rows;
 }
 
+// 공식 원문 확인: 정책 이름으로 찾아 지원 내용과 수정일을 그대로 돌려준다
+export async function officialYouth(key: string, name: string): Promise<Omit<OfficialRecord, "query" | "exact">[]> {
+  const rows = await fetchPage(key, { plcyNm: name });
+  return rows.map((r) => {
+    const n = toNotice(r);
+    return {
+      source: "온통청년",
+      name: n.name,
+      org: n.org,
+      updated: ymdOf(s(r.lastMdfcnDt, 20)),
+      benefit: s(r.plcySprtCn || r.plcyExplnCn, 700),
+      target: n.target,
+      deadline: n.deadlineText,
+      url: n.url,
+    };
+  });
+}
+
 // 대안 찾기: 키워드로 전체 정책(약 4천 건)을 검색하고 내 조건에 맞는 것만 남긴다
-export async function searchYouth(key: string, q: YouthQuery, keywords: string[]): Promise<Gov24Notice[]> {
+export async function searchYouth(key: string, q: YouthQuery, keywords: string[], limit = 6): Promise<Gov24Notice[]> {
   const pages = await Promise.allSettled(
     keywords.flatMap((kw) => [fetchPage(key, { plcyNm: kw }), fetchPage(key, { plcyExplnCn: kw })])
   );
@@ -235,7 +254,7 @@ export async function searchYouth(key: string, q: YouthQuery, keywords: string[]
     })
     .filter((x) => x.fit >= 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 6)
+    .slice(0, limit)
     .map((x) => toNotice(x.r))
     .filter((n) => n.id && n.name);
 }

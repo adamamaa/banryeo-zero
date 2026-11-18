@@ -103,7 +103,7 @@ const toNotice = (x: Item): Gov24Notice => ({
 });
 
 // 대안 찾기: 서비스명·내용을 키워드로 검색한다 (시도 공통 사업과 내 시군구 사업만)
-export async function searchWelfare(key: string, q: WelfareQuery, keywords: string[]): Promise<Gov24Notice[]> {
+export async function searchWelfare(key: string, q: WelfareQuery, keywords: string[], limit = 6): Promise<Gov24Notice[]> {
   const ctpvs = q.sido ? CTPV[q.sido] : undefined;
   if (!ctpvs) return [];
   const results = await Promise.allSettled(
@@ -121,7 +121,7 @@ export async function searchWelfare(key: string, q: WelfareQuery, keywords: stri
       return (!x.sggNm || !q.sigungu || x.sggNm === q.sigungu) && fitsMe(x, q);
     })
     .sort((a, b) => Number(b.sggNm === q.sigungu) - Number(a.sggNm === q.sigungu))
-    .slice(0, 6)
+    .slice(0, limit)
     .map(toNotice);
 }
 

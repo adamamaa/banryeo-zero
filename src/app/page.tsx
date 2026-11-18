@@ -27,6 +27,7 @@ import type { AuditResult } from "@/lib/docRules";
 import type { AnswerCard, PolicyDetail } from "@/lib/card";
 import type { AgentAsk, AgentChecklist, AgentDraft, PlanStep } from "@/lib/agent";
 import type { Verification } from "@/lib/verify";
+import { downloadFile, downloadName, fileMeta, parseBlocks, type GeneratedFile } from "@/lib/fileExport";
 import { AgentOverlay, AgentPlanCard, type AgentPlanStep, type AgentTarget } from "@/components/AgentOverlay";
 import {
   InfoOnboarding,
@@ -137,6 +138,8 @@ interface Message {
   // 실행 단계 산출물: AI가 쓴 제출용 초안과 제출 직전 체크리스트 (사용자가 고치고 체크한 상태 포함)
   draft?: AgentDraft;
   checklist?: AgentChecklist;
+  // AI가 만든 파일 (내용만 저장하고 다운로드할 때 파일로 만든다)
+  files?: GeneratedFile[];
   // 서버가 답변을 도구 결과·오늘 날짜·공식 도메인과 대조한 결과
   verification?: Verification;
   // AI가 처음 세운 실행 계획과 단계별 실행 여부
@@ -365,6 +368,10 @@ export default function Page() {
   // 이전에 안내한 정책 정보. 다음 질문에 함께 보내 같은 정책은 같은 값으로 답하게 한다.
   const [facts, setFacts] = useState<Record<string, PolicyDetail & { at: number }>>({});
   const endRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  // 사용자가 위로 올려 읽는 중이 아니면 AI 진행 상황의 맨 아래를 따라간다
+  const followRef = useRef(true);
+  const lastUserScrollRef = useRef(0);
 
   // AI 에이전트 시각적 연출(플랜 HUD, 가상 커서, 빨간 네모 하이라이트, 스캔 라인, 긴급 중지)
   const [agentActive, setAgentActive] = useState(false);
@@ -481,6 +488,21 @@ export default function Page() {
   };
 
   const scrollDown = () => setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 60);
+  // 글이 줄어들 때도 스크롤 위치가 바뀌므로, 실제 휠·터치 입력만 '위로 올려 읽는 중'으로 본다
+  const stopFollowing = () => {
+    followRef.current = false;
+    lastUserScrollRef.current = Date.now();
+  };
+  const onChatScroll = () => {
+    const el = chatScrollRef.current;
+    if (!el || Date.now() - lastUserScrollRef.current < 300) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) followRef.current = true;
+  };
+  // 진행 단계와 AI 판단 글이 늘어나면 화면도 함께 내려간다
+  const followProgress = () => {
+    const el = chatScrollRef.current;
+    if (el && followRef.current) el.scrollTop = el.scrollHeight;
+  };
 
   const uploadAudit = upload?.result || null;
   const uploadRisks = uploadAudit ? risksOf(uploadAudit) : 0;
@@ -613,7 +635,12 @@ export default function Page() {
   }, [facts, loaded]);
 
   useEffect(() => {
-    if (loaded) localStorage.setItem("gonggopass_chats", JSON.stringify(chats));
+    if (!loaded) return;
+    try {
+      localStorage.setItem("gonggopass_chats", JSON.stringify(chats));
+    } catch {
+      // 브라우저 저장 공간이 가득 차면 이번 기록만 저장하지 않는다 (화면의 대화는 그대로)
+    }
   }, [chats, loaded]);
 
   useEffect(() => {
@@ -664,6 +691,7 @@ export default function Page() {
       { id, role: "assistant", content: "", time: now(), pending: true },
     ]);
     setWorking(true);
+    followRef.current = true;
     scrollDown();
     return id;
   };
@@ -1116,6 +1144,7 @@ export default function Page() {
         ask: askData,
         draft: (data.draft as AgentDraft | undefined) || undefined,
         checklist: (data.checklist as AgentChecklist | undefined) || undefined,
+        files: (data.files as GeneratedFile[] | undefined)?.length ? (data.files as GeneratedFile[]) : undefined,
         verification: (data.verification as Verification | undefined) || undefined,
         plan: (data.plan as PlanStep[] | undefined) || undefined,
         ...(eligibility && {
@@ -1148,7 +1177,7 @@ export default function Page() {
       setAgentScanning(false);
     } finally {
       setWorking(false);
-      scrollDown();
+      if (followRef.current) scrollDown();
     }
   };
 
@@ -1461,45 +1490,59 @@ export default function Page() {
         )}
 
         <main className="flex-1 flex flex-col bg-[#f6f4fe] overflow-hidden relative justify-between min-w-0">
-          <header className="h-16 px-6 shrink-0 flex items-center justify-between border-b border-transparent">
-            <div className="flex items-center gap-2">
+          {/* 버튼만 채팅 위에 띄워서, 대화가 화면 맨 위까지 올라오게 한다 */}
+          <header className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between px-4 py-2.5">
+            <div className="pointer-events-auto flex items-center gap-2">
               {!sidebarOpen && (
-                <IconButton label="사이드바 열기" onClick={() => setSidebarOpen(true)} className="max-lg:hidden">
+                <IconButton label="사이드바 열기" onClick={() => setSidebarOpen(true)} className="bg-[#f6f4fe]/90 backdrop-blur max-lg:hidden">
                   <PanelLeft className="h-4 w-4" />
                 </IconButton>
               )}
             </div>
 
-            <div className="flex items-center space-x-2">
-              {messages.length > 0 && (
-                <button
-                  type="button"
-                  onClick={newChat}
-                  className="inline-flex items-center space-x-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>새 대화</span>
-                </button>
-              )}
-              <button
-                type="button"
-                aria-label={canvasOpen ? "점검 패널 닫기" : "점검 패널 열기"}
-                title={canvasOpen ? "점검 패널 닫기" : "점검 패널 열기"}
-                aria-pressed={canvasOpen}
-                onClick={() => setCanvasOpen((v) => !v)}
-                className={`p-1.5 rounded-lg transition-colors ${
-                  canvasOpen
-                    ? "bg-purple-50 text-purple-700 hover:bg-purple-100"
-                    : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+            {(messages.length > 0 || !canvasOpen) && (
+              <div
+                className={`pointer-events-auto flex items-center space-x-1 rounded-xl bg-[#f6f4fe]/90 p-0.5 backdrop-blur ${
+                  canvasOpen ? "lg:hidden" : ""
                 }`}
               >
-                <PanelRight className="w-4 h-4" />
-              </button>
-            </div>
+                {/* 좁은 화면에는 사이드바가 없어서 새 대화 버튼을 여기에 둔다 */}
+                {messages.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={newChat}
+                    className="inline-flex items-center space-x-1.5 rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 lg:hidden"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>새 대화</span>
+                  </button>
+                )}
+                {/* 패널이 열려 있으면 닫기 버튼은 패널 안에 있다 */}
+                {!canvasOpen && (
+                  <button
+                    type="button"
+                    aria-label="점검 패널 열기"
+                    title="점검 패널 열기"
+                    onClick={() => setCanvasOpen(true)}
+                    className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                  >
+                    <PanelRight className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            )}
           </header>
 
-          <div className="flex-1 overflow-y-auto no-scrollbar">
-            <div className="px-6 md:px-8 max-w-3xl mx-auto w-full min-h-full flex flex-col items-center pt-2 pb-6">
+          <div
+            ref={chatScrollRef}
+            onScroll={onChatScroll}
+            onWheel={(e) => {
+              if (e.deltaY < 0) stopFollowing();
+            }}
+            onTouchMove={stopFollowing}
+            className="flex-1 overflow-y-auto no-scrollbar"
+          >
+            <div className="px-6 md:px-8 max-w-3xl mx-auto w-full min-h-full flex flex-col items-center pt-12 pb-6">
               {messages.length === 0 ? (
                 // 첫 화면: 한 줄 소개 → 시연 단계 (입력창은 맨 아래 고정)
                 <div className="flex w-full flex-1 flex-col items-center justify-center">
@@ -1605,23 +1648,29 @@ export default function Page() {
                                 paused={agentPaused}
                                 steps={agentSteps}
                                 thought={agentThought}
+                                onGrow={followProgress}
                               />
                             )}
                           </div>
                         ) : (
                           <>
                             {msg.card ? (
-                              <CardView card={msg.card} onAsk={(q) => send(undefined, q)} disabled={working} />
+                              <CardView card={msg.card} onAsk={(q) => send(undefined, q)} disabled={working}>
+                                {msg.files?.map((f) => <FileCard key={downloadName(f)} file={f} />)}
+                              </CardView>
                             ) : (
-                              <div
-                                className={`whitespace-pre-wrap text-sm leading-relaxed ${
-                                  msg.error
-                                    ? "rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-red-800"
-                                    : "rounded-2xl border border-purple-100/90 bg-white px-4 py-3.5 text-slate-800 shadow-sm"
-                                }`}
-                              >
-                                <Rich text={msg.content} />
-                              </div>
+                              <>
+                                <div
+                                  className={`whitespace-pre-wrap text-sm leading-relaxed ${
+                                    msg.error
+                                      ? "rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-red-800"
+                                      : "rounded-2xl border border-purple-100/90 bg-white px-4 py-3.5 text-slate-800 shadow-sm"
+                                  }`}
+                                >
+                                  <Rich text={msg.content} />
+                                </div>
+                                {msg.files?.map((f) => <FileCard key={downloadName(f)} file={f} />)}
+                              </>
                             )}
 
                             {msg.ask && (
@@ -1743,7 +1792,7 @@ export default function Page() {
         }`}
       >
         <div
-          className={`flex h-full w-full min-w-[380px] max-lg:min-w-0 flex-col transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          className={`flex h-full w-full min-w-[360px] max-lg:min-w-0 flex-col transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
             canvasOpen ? "translate-x-0" : "lg:translate-x-6"
           }`}
         >
@@ -1757,7 +1806,11 @@ export default function Page() {
             ) : (
               <span className="text-xs font-medium text-slate-400">점검 결과</span>
             )}
-            <IconButton label="점검 패널 닫기" onClick={() => setCanvasOpen(false)} className="lg:hidden">
+            <IconButton
+              label="점검 패널 닫기"
+              onClick={() => setCanvasOpen(false)}
+              className="shrink-0 bg-purple-50 !text-purple-700 hover:bg-purple-100"
+            >
               <PanelRight className="h-4 w-4" />
             </IconButton>
           </div>
@@ -2452,11 +2505,123 @@ function AskCard({
   );
 }
 
-function CardView({ card, onAsk, disabled }: { card: AnswerCard; onAsk: (q: string) => void; disabled: boolean }) {
+function MiniTable({ rows }: { rows: string[][] }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-slate-200">
+      <table className="w-full border-collapse text-left text-xs">
+        <tbody>
+          {rows.map((row, y) => (
+            <tr key={y} className={y === 0 ? "bg-purple-50 font-semibold text-slate-800" : "border-t border-slate-100 text-slate-600"}>
+              {row.map((c, x) => (
+                <td key={x} className="min-w-[72px] px-2.5 py-1.5 align-top leading-relaxed">
+                  <Rich text={c} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// AI가 쓴 글·번역·표 결과물
+function AnswerBody({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+      <div className="space-y-2 text-[13px] leading-relaxed text-slate-700">
+        {parseBlocks(text).map((b, i) =>
+          b.type === "heading" ? (
+            <p key={i} className={`font-semibold text-slate-900 ${b.level === 1 ? "text-sm" : "text-[13px]"}`}>
+              <Rich text={b.text} />
+            </p>
+          ) : b.type === "bullet" ? (
+            <p key={i} className="flex gap-2">
+              <span className="text-slate-400">•</span>
+              <span className="min-w-0">
+                <Rich text={b.text} />
+              </span>
+            </p>
+          ) : b.type === "table" ? (
+            <MiniTable key={i} rows={b.rows} />
+          ) : b.type === "code" ? (
+            <pre key={i} className="overflow-x-auto rounded-lg bg-slate-900 px-3 py-2.5 font-mono text-xs leading-relaxed text-slate-100">
+              <code>{b.text}</code>
+            </pre>
+          ) : (
+            <p key={i}>
+              <Rich text={b.text} />
+            </p>
+          )
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={async () => {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }}
+        className="mt-2 text-xs font-medium text-purple-700 hover:underline"
+      >
+        {copied ? "복사했습니다" : "복사"}
+      </button>
+    </div>
+  );
+}
+
+// AI가 만든 파일: 이름과 내용 요약, 다운로드 버튼
+function FileCard({ file }: { file: GeneratedFile }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="space-y-2.5 rounded-2xl border border-purple-200 bg-white p-3.5 shadow-sm">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13px] font-semibold text-slate-900">{downloadName(file)}</p>
+          <p className="truncate text-xs text-slate-500">
+            {fileMeta(file)}
+            {file.description ? ` · ${file.description}` : ""}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            try {
+              downloadFile(file);
+              setFailed(false);
+            } catch {
+              setFailed(true);
+            }
+          }}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-purple-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-800"
+        >
+          <Download className="h-3.5 w-3.5" />
+          다운로드
+        </button>
+      </div>
+      {failed && <p className="text-xs text-red-700">파일을 만들지 못했습니다. 다시 요청해 주세요.</p>}
+    </div>
+  );
+}
+
+function CardView({
+  card,
+  onAsk,
+  disabled,
+  children,
+}: {
+  card: AnswerCard;
+  onAsk: (q: string) => void;
+  disabled: boolean;
+  children?: React.ReactNode;
+}) {
   return (
     <>
       <div className="space-y-3.5 rounded-2xl border border-purple-100/90 bg-white p-4 shadow-sm">
         <p className="text-[15px] font-semibold leading-snug text-slate-900">{card.summary}</p>
+
+        {card.body && <AnswerBody text={card.body} />}
 
         {card.facts.length > 0 && (
           <dl className="grid grid-cols-2 gap-2">
@@ -2554,6 +2719,8 @@ function CardView({ card, onAsk, disabled }: { card: AnswerCard; onAsk: (q: stri
         )}
       </div>
 
+      {children}
+
       {card.followUps.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {card.followUps.map((q) => (
@@ -2585,7 +2752,8 @@ function Rich({ text }: { text: string }) {
             {p}
           </a>
         ) : (
-          p
+          // 짝이 맞지 않아 남은 ** 기호는 보여 주지 않는다
+          p.replace(/\*\*/g, "")
         )
       )}
     </>

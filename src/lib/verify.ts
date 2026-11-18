@@ -2,6 +2,7 @@
 // 도구 결과(자격 계산)·오늘 날짜·공식 도메인과 대조해, 고쳐야 할 점이 있으면 AI에게 한 번 다시 쓰게 한다.
 import { isNegativeAnswer, parseCard } from "./card";
 import { resolveAlternatives, type AltCandidate } from "./alternatives";
+import { benefitExcerpt, findAmountIssues, pickOfficial, type OfficialRecord } from "./officialFacts";
 import type { EligibilitySummary } from "./agent";
 
 export interface VerifyCheck {
@@ -24,6 +25,9 @@ const num = (s: string) => Number(s.replace(/,/g, ""));
 const THRESHOLD_PERCENTS = [48, 50, 60, 100, 120, 150, 180];
 // 정부·공공기관 도메인 (정부24는 gov.kr)
 const OFFICIAL_HOST = /(^|\.)(go\.kr|or\.kr|gov\.kr)$/;
+// "엑셀로 정리해줘", "워드 파일 만들어 줘", "csv로 뽑아줘", "캘린더 파일 줘" 같은 요청
+const WANTS_FILE =
+  /(엑셀|xlsx|스프레드시트|csv|docx|워드\s*(파일|문서)|워드로|캘린더\s*파일|\bics\b|파일로|pdf로|hwp로|한글\s*파일로)[^.?!\n]{0,14}(만들|뽑|작성|정리|내보|내려|다운|저장|줘|주세요)/i;
 
 function rawLinks(text: string): string[] {
   const a = text.indexOf("{");
@@ -47,6 +51,9 @@ export function verifyAnswer(
     hosts?: string[];
     alternativesSearched?: boolean;
     alternatives?: AltCandidate[];
+    question?: string;
+    fileCount?: number;
+    official?: OfficialRecord[];
   } = {}
 ): VerifyCheck[] {
   const checks: VerifyCheck[] = [];
@@ -156,6 +163,49 @@ export function verifyAnswer(
             name: "대안 제시",
             ok: false,
             note: "안 된다고만 답했습니다. 사용자의 원래 목적을 정해 find_alternatives로 다른 지원을 찾고, alternatives에 넣어 다시 답하세요.",
+            severity: "fix",
+          }
+    );
+  }
+
+  // 금액: 정책 금액이 가장 최근 공식 원문과 같은지
+  const officialUsed = pickOfficial(opts.official || []);
+  if (card && officialUsed.length) {
+    const issues = findAmountIssues(card, officialUsed);
+    checks.push(
+      issues.length
+        ? {
+            name: "공식 원문",
+            ok: false,
+            note: issues
+              .slice(0, 3)
+              .map(
+                (i) =>
+                  `'${i.policy}'의 '${i.amount}'이(가) 최신 공식 원문(${i.record.source}, ${i.record.updated} 수정)에 없습니다. 원문: "${benefitExcerpt(i.record)}"`
+              )
+              .join(" / ")
+              .concat(" 원문 기준으로 고치세요."),
+            severity: "fix",
+          }
+        : {
+            name: "공식 원문",
+            ok: true,
+            note: `정책 ${officialUsed.length}개를 최신 공식 원문과 대조`,
+            severity: "fix",
+          }
+    );
+  }
+
+  // 파일: 파일을 달라고 했는데 말로만 답하지 않았는지
+  if (WANTS_FILE.test(opts.question || "")) {
+    const count = opts.fileCount || 0;
+    checks.push(
+      count
+        ? { name: "파일 생성", ok: true, note: `요청한 파일 ${count}개 생성`, severity: "fix" }
+        : {
+            name: "파일 생성",
+            ok: false,
+            note: "파일을 요청받았는데 만들지 않았습니다. create_file을 호출해 파일을 만든 뒤 다시 답하세요.",
             severity: "fix",
           }
     );
