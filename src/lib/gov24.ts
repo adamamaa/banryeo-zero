@@ -37,7 +37,12 @@ async function call(path: string, key: string, params: Record<string, string>): 
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
-const ymd = (y: number, m: number, d: number) => `${y}-${pad(m)}-${pad(d)}`;
+const ymd = (y: number, m: number, d: number) =>
+  m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}-${pad(m)}-${pad(d)}` : undefined;
+const todayYmd = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
 
 // "2026. 12. 1.(월) ~ 12. 19.(금)", "2026.3.30.~2026.5.29.", "2026-12-31까지", "상시신청" 등을 날짜로 바꾼다
 export function parseApplyPeriod(text: string): { start?: string; end?: string } {
@@ -47,10 +52,17 @@ export function parseApplyPeriod(text: string): { start?: string; end?: string }
   const [d0] = full;
   const y0 = Number(d0[1]);
   const start = ymd(y0, Number(d0[2]), Number(d0[3]));
-  if (full.length >= 2) return { start, end: ymd(Number(full[1][1]), Number(full[1][2]), Number(full[1][3])) };
+  if (!start) return {};
+  if (full.length >= 2) {
+    const end = ymd(Number(full[1][1]), Number(full[1][2]), Number(full[1][3]));
+    return end ? { start, end } : { start };
+  }
   const after = t.slice((d0.index ?? 0) + d0[0].length);
   const short = after.match(/^[^~]{0,12}~\s*(\d{1,2})\s*[.\-월/]\s*(\d{1,2})/);
-  if (short) return { start, end: ymd(y0, Number(short[1]), Number(short[2])) };
+  if (short) {
+    const end = ymd(y0, Number(short[1]), Number(short[2]));
+    return end ? { start, end } : { start };
+  }
   if (/^.{0,8}(까지|마감)/.test(after)) return { end: start };
   return { start };
 }
@@ -111,15 +123,36 @@ const INTEREST_KEYWORD: Record<string, string> = {
   "건강·심리": "심리",
 };
 
+const SIDO_FULL: Record<string, string[]> = {
+  서울: ["서울특별시"],
+  부산: ["부산광역시"],
+  대구: ["대구광역시"],
+  인천: ["인천광역시"],
+  광주: ["광주광역시", "전남광주통합특별시"],
+  대전: ["대전광역시"],
+  울산: ["울산광역시"],
+  세종: ["세종특별자치시"],
+  경기: ["경기도"],
+  강원: ["강원특별자치도", "강원도"],
+  충북: ["충청북도"],
+  충남: ["충청남도"],
+  전북: ["전북특별자치도", "전라북도"],
+  전남: ["전라남도", "전남광주통합특별시"],
+  경북: ["경상북도"],
+  경남: ["경상남도"],
+  제주: ["제주특별자치도"],
+};
+
 // 같은 조건은 10분 동안 다시 부르지 않는다 (호출 한도 아끼기)
 const cache = new Map<string, { at: number; data: Gov24Notice[] }>();
 
 export async function recommendGov24(
   key: string,
-  q: { sido?: string; sigungu?: string; interests?: string[] }
+  q: { sido?: string; sigungu?: string; interests?: string[] },
+  opts?: { bypassCache?: boolean }
 ): Promise<Gov24Notice[]> {
   const cacheKey = JSON.stringify(q);
-  const hit = cache.get(cacheKey);
+  const hit = !opts?.bypassCache ? cache.get(cacheKey) : undefined;
   if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.data;
 
   // serviceList는 서비스명·서비스ID·등록/수정일시로만 거를 수 있다 (Swagger 기준).
@@ -136,14 +169,25 @@ export async function recommendGov24(
   ).flat();
 
   const org = (r: Row) => s(r["소관기관명"]);
-  // 순위: 내 시군구 기관 → 내 시도 기관 → 관심 분야(청년 대상) → 중앙부처 청년 서비스
-  const local = q.sigungu ? youthRows.filter((r) => org(r).includes(q.sigungu!)) : [];
-  // 시도 단위 기관(예: "서울특별시")만. 같은 시도의 다른 시군구 사업(예: "서울특별시 성동구")은 뺀다
-  const regional = q.sido
-    ? youthRows.filter((r) => org(r).startsWith(q.sido!) && !org(r).includes(" ") && !local.includes(r))
-    : [];
-  const isCentral = (r: Row) => /중앙|부$|처$|청$|위원회$|공단$|공사$|원$/.test(org(r)) || s(r["소관기관유형"]).includes("중앙");
-  const interest = interestRows.filter((r) => /청년|19세|34세|39세/.test(`${s(r["서비스명"])} ${s(r["지원대상"])}`));
+  const sidoPrefixes = q.sido ? SIDO_FULL[q.sido] || [q.sido] : [];
+  const inMySido = (o: string) => !sidoPrefixes.length || sidoPrefixes.some((p) => o.startsWith(p));
+  const isRegionalOrg = (o: string) => sidoPrefixes.some((p) => o === p);
+  const isLocalGov = (r: Row) =>
+    s(r["소관기관유형"]).includes("지방") ||
+    /^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|전북|전남|경상|경북|경남|제주)/.test(org(r));
+  const isCentral = (r: Row) =>
+    s(r["소관기관유형"]).includes("중앙") ||
+    (!isLocalGov(r) && (/중앙|부$|처$|청$|위원회$|공단$|공사$|원$/.test(org(r)) || org(r).length > 0));
+
+  // 순위: 내 시군구 기관 → 내 시도 기관 → 관심 분야(내 지역·중앙 청년 대상) → 중앙부처 청년 서비스
+  const local = q.sigungu ? youthRows.filter((r) => inMySido(org(r)) && org(r).includes(q.sigungu!)) : [];
+  const regional = q.sido ? youthRows.filter((r) => isRegionalOrg(org(r)) && !local.includes(r)) : [];
+  const interest = interestRows.filter((r) => {
+    if (!/청년|19세|34세|39세/.test(`${s(r["서비스명"])} ${s(r["지원대상"])}`)) return false;
+    if (!q.sido) return true;
+    const o = org(r);
+    return isCentral(r) || isRegionalOrg(o) || (Boolean(q.sigungu) && inMySido(o) && o.includes(q.sigungu!));
+  });
   const central = youthRows.filter(isCentral);
 
   const seen = new Set<string>();
@@ -164,7 +208,10 @@ export async function recommendGov24(
         .catch(() => undefined)
     )
   );
-  const data = rows.map((r, i) => toNotice(r, details[i])).filter((n) => n.id && n.name);
+  const today = todayYmd();
+  const data = rows
+    .map((r, i) => toNotice(r, details[i]))
+    .filter((n) => n.id && n.name && (!n.applyEnd || n.applyEnd >= today));
   cache.set(cacheKey, { at: Date.now(), data });
   return data;
 }

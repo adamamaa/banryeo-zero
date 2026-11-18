@@ -372,8 +372,14 @@ export default function Page() {
   const [welcome, setWelcome] = useState<{ intro: boolean; startKey?: InfoKey; group?: InfoGroup } | null>(null);
   // 알아서 다시 점검: 내 정보가 바뀌었거나 마감이 다가올 때 바뀐 점
   const [recheck, setRecheck] = useState<{ items: RecheckItem[]; at: number } | null>(null);
-  // 보조금24 실시간 공고 (내 지역·관심 분야 기준)
+  // 실시간 공고 (온통청년·복지로·보조금24, 내 정보 기준)
   const [live, setLive] = useState<LiveNotices>({ status: "idle", notices: [] });
+  const [liveNonce, setLiveNonce] = useState(0);
+  const forceRefreshRef = useRef(false);
+  const refreshLive = () => {
+    forceRefreshRef.current = true;
+    setLiveNonce((n) => n + 1);
+  };
   const [tools, setTools] = useState<ToolExecution[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -645,13 +651,19 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboard, welcome, loaded]);
 
-  // 보조금24 실시간 공고: 지역·관심 분야가 바뀌면 다시 조회한다 (서버가 10분 캐시)
+  // 실시간 공고: 내 정보가 채워지거나 조건이 바뀌면 온통청년·복지로·보조금24에서 조회한다 (서버 10분 캐시)
   const liveKey = [
     extra.sido, extra.sigungu, extra.interests, profile.age, extra.job, extra.marriage, extra.children, extra.education, extra.special, extra.company,
   ].join("|");
   useEffect(() => {
-    if (!loaded || welcome || !(extra.sido || extra.interests)) return;
+    if (!loaded || welcome) return;
+    if (!hasAnyInfo) {
+      setLive({ status: "idle", notices: [] });
+      return;
+    }
     let cancelled = false;
+    const refresh = forceRefreshRef.current;
+    forceRefreshRef.current = false;
     const t = window.setTimeout(async () => {
       setLive((l) => ({ ...l, status: "loading" }));
       try {
@@ -661,6 +673,7 @@ export default function Page() {
           body: JSON.stringify({
             action: "gov24_recommend",
             publicDataApiKey: publicKey || undefined,
+            refresh,
             sido: extra.sido,
             sigungu: extra.sigungu,
             interests: extra.interests ? extra.interests.split(",") : [],
@@ -688,13 +701,13 @@ export default function Page() {
       } catch {
         if (!cancelled) setLive({ status: "error", notices: [] });
       }
-    }, 600);
+    }, refresh ? 0 : 350);
     return () => {
       cancelled = true;
       window.clearTimeout(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveKey, loaded, welcome]);
+  }, [liveKey, hasAnyInfo, liveNonce, loaded, welcome]);
 
   // 알아서 다시 점검: 내 정보가 바뀌면 받을 수 있는 지원과 판정을 다시 계산해 지난 점검과 비교하고,
   // 받을 수 있는 공고의 마감이 7일 안이면 알린다 (하루에 한 번). 브라우저 계산만 쓴다.
@@ -1685,10 +1698,10 @@ export default function Page() {
 
             <div className="flex-1 overflow-y-auto no-scrollbar pt-4 text-xs space-y-4 pr-1">
               <SidebarRecs
-                ctx={benefitCtx}
                 hasInfo={hasAnyInfo}
                 onStartInfo={startInfo}
                 onAsk={(q) => send(undefined, q)}
+                onRefresh={refreshLive}
                 busy={working}
                 search={sidebarSearch.trim().toLowerCase()}
                 live={live}

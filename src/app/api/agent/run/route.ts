@@ -204,41 +204,55 @@ export async function POST(req: NextRequest) {
       if (!pk && !yk) return NextResponse.json({ connected: false, reason: "no_key", notices: [], sources: [] });
       const clean = (v: unknown) => (typeof v === "string" ? v.replace(/[^0-9A-Za-z가-힣·\s]/g, "").slice(0, 20) : "");
       const list = (v: unknown) => (Array.isArray(v) ? v : []).map(clean).filter(Boolean).slice(0, 8);
+      const sido = clean(body.sido);
+      const sigungu = clean(body.sigungu);
       const interests = list(body.interests).slice(0, 3);
       const age = Number.isFinite(Number(body.age)) && body.age !== "" && body.age != null ? Number(body.age) : null;
+      const children = clean(body.children);
+      const opts = body.refresh ? { bypassCache: true } : undefined;
 
       const [gov, youth, welfare] = await Promise.all([
         pk
-          ? recommendGov24(pk, { sido: clean(body.sido), sigungu: clean(body.sigungu), interests }).then(
+          ? recommendGov24(pk, { sido, sigungu, interests }, opts).then(
               (n) => ({ ok: true, n }),
               () => ({ ok: false, n: [] as Gov24Notice[] })
             )
           : Promise.resolve({ ok: false, n: [] as Gov24Notice[] }),
         yk
-          ? recommendYouth(yk, {
-              sido: clean(body.sido),
-              age,
-              job: clean(body.job),
-              marriage: clean(body.marriage),
-              education: clean(body.education),
-              special: list(body.special),
-              company: clean(body.company),
-              interests,
-            }).then(
+          ? recommendYouth(
+              yk,
+              {
+                sido,
+                sigungu,
+                age,
+                job: clean(body.job),
+                marriage: clean(body.marriage),
+                children,
+                education: clean(body.education),
+                special: list(body.special),
+                company: clean(body.company),
+                interests,
+              },
+              opts
+            ).then(
               (n) => ({ ok: true, n }),
               () => ({ ok: false, n: [] as Gov24Notice[] })
             )
           : Promise.resolve({ ok: false, n: [] as Gov24Notice[] }),
-        // 복지로 지자체 복지서비스 (같은 공공데이터포털 키)
-        pk
-          ? recommendWelfare(pk, {
-              sido: clean(body.sido),
-              sigungu: clean(body.sigungu),
-              special: list(body.special),
-              interests,
-              marriage: clean(body.marriage),
-              children: clean(body.children),
-            }).then(
+        // 복지로 지자체 복지서비스 (같은 공공데이터포털 키, 시도가 있을 때만 조회)
+        pk && sido
+          ? recommendWelfare(
+              pk,
+              {
+                sido,
+                sigungu,
+                special: list(body.special),
+                interests,
+                marriage: clean(body.marriage),
+                children,
+              },
+              opts
+            ).then(
               (n) => ({ ok: true, n }),
               () => ({ ok: false, n: [] as Gov24Notice[] })
             )
@@ -262,7 +276,9 @@ export async function POST(req: NextRequest) {
       add(youth.n, 5);
       add(welfare.n, 3);
       add(gov.n, 3);
-      add(youth.n, 10); // 자리가 남으면 온통청년으로 채운다
+      add(youth.n, 10);
+      add(welfare.n, 6);
+      add(gov.n, 6);
       return NextResponse.json({
         connected: true,
         sources: [...(youth.ok ? ["온통청년"] : []), ...(welfare.ok ? ["복지로"] : []), ...(gov.ok ? ["보조금24"] : [])],

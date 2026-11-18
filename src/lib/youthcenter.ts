@@ -63,9 +63,11 @@ const INTEREST_CLASS: Record<string, string> = {
 
 export interface YouthQuery {
   sido?: string;
+  sigungu?: string;
   age?: number | null;
   job?: string;
   marriage?: string;
+  children?: string;
   education?: string;
   special?: string[];
   company?: string;
@@ -100,6 +102,8 @@ export function scorePolicy(r: Row, q: YouthQuery): number {
   const name = s(r.plcyNm);
   const mine = q.special || [];
   for (const [re, group] of GROUP_ONLY) if (re.test(name) && !mine.includes(group)) return -1;
+  const familyFree = q.marriage === "미혼" && (!q.children || q.children === "없음");
+  if (familyFree && /신혼부부|난임|임신|출산|산후/.test(name)) return -1;
   let score = 0;
 
   // 지역: 코드 목록에 내 시도가 없으면 제외. 목록이 짧으면(지자체 사업) 가산점
@@ -110,6 +114,7 @@ export function scorePolicy(r: Row, q: YouthQuery): number {
     // 전국 사업은 시군구 코드가 250개 안팎이라, 짧은 목록이면 지자체 사업으로 보고 가산점
     if (zips.length <= 40) score += 2;
   }
+  if (q.sigungu && `${s(r.sprvsnInstCdNm)} ${s(r.operInstCdNm)} ${name}`.includes(q.sigungu)) score += 2;
 
   // 나이: 제한이 있는 정책만 범위 확인 (최대 0은 상한 없음으로 본다)
   const min = Number(s(r.sprtTrgtMinAge)) || 0;
@@ -201,9 +206,13 @@ async function loadPool(key: string): Promise<Row[]> {
   return rows;
 }
 
-export async function recommendYouth(key: string, q: YouthQuery): Promise<Gov24Notice[]> {
+export async function recommendYouth(
+  key: string,
+  q: YouthQuery,
+  opts?: { bypassCache?: boolean }
+): Promise<Gov24Notice[]> {
   const cacheKey = JSON.stringify(q);
-  const hit = cache.get(cacheKey);
+  const hit = !opts?.bypassCache ? cache.get(cacheKey) : undefined;
   if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.data;
 
   const seen = new Set<string>();

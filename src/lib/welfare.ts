@@ -79,23 +79,35 @@ export interface WelfareQuery {
 
 const cache = new Map<string, { at: number; data: Gov24Notice[] }>();
 
-export async function recommendWelfare(key: string, q: WelfareQuery): Promise<Gov24Notice[]> {
+export async function recommendWelfare(
+  key: string,
+  q: WelfareQuery,
+  opts?: { bypassCache?: boolean }
+): Promise<Gov24Notice[]> {
   const ctpvs = q.sido ? CTPV[q.sido] : undefined;
   if (!ctpvs) return [];
   const cacheKey = JSON.stringify(q);
-  const hit = cache.get(cacheKey);
+  const hit = !opts?.bypassCache ? cache.get(cacheKey) : undefined;
   if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.data;
 
   let items: Item[] = [];
+  let anyOk = false;
   for (const ctpvNm of ctpvs) {
-    const [local, sido] = await Promise.all([
-      q.sigungu ? fetchList(key, { numOfRows: "30", ctpvNm, sggNm: q.sigungu }).catch(() => [] as Item[]) : Promise.resolve([] as Item[]),
-      fetchList(key, { numOfRows: "50", ctpvNm }).catch(() => [] as Item[]),
+    const [localRes, sidoRes] = await Promise.allSettled([
+      q.sigungu ? fetchList(key, { numOfRows: "30", ctpvNm, sggNm: q.sigungu }) : Promise.resolve([] as Item[]),
+      fetchList(key, { numOfRows: "50", ctpvNm }),
     ]);
+    const localOk = Boolean(q.sigungu) && localRes.status === "fulfilled";
+    const sidoOk = sidoRes.status === "fulfilled";
+    if (!localOk && !sidoOk) continue;
+    anyOk = true;
+    const local = localRes.status === "fulfilled" ? localRes.value : [];
+    const sido = sidoRes.status === "fulfilled" ? sidoRes.value : [];
     // 시도 전체 목록에서는 시도 공통 사업(시군구 없음)과 내 시군구 사업만 남긴다
     items = [...local, ...sido.filter((x) => !x.sggNm || x.sggNm === q.sigungu)];
     if (items.length) break;
   }
+  if (!anyOk) throw new Error("복지로 조회 실패");
 
   const mine = q.special || [];
   const seen = new Set<string>();
