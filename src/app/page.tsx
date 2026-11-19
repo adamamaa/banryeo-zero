@@ -1060,6 +1060,8 @@ export default function Page() {
                   sido: extra.sido || undefined,
                   job: extra.job || undefined,
                   housing: extra.housing || undefined,
+                  // 자격 계산의 무주택 조건에 쓴다
+                  homeOwner: extra.homeOwner || undefined,
                   // 대안 찾기에서 실시간 공고를 내 조건으로 거를 때 쓰는 값
                   marriage: extra.marriage || undefined,
                   children: extra.children || undefined,

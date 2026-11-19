@@ -657,6 +657,9 @@ ${CARD_FORMAT}`,
               depositManwon: has(up.deposit) ? Number(up.deposit) : undefined,
               rentManwon: has(up.rent) ? Number(up.rent) : undefined,
               sepMonths: has(up.sepMonths) ? Number(up.sepMonths) : undefined,
+              // 첫 화면의 주택 소유 답 (자가 거주면 주택 보유로 본다)
+              housesOwned:
+                up.homeOwner === "무주택" ? 0 : up.homeOwner === "주택 보유" || up.housing === "자가" ? 1 : undefined,
             },
             profile: {
               sido: text(up.sido),
