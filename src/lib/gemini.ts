@@ -1,4 +1,53 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 export const GEMINI_MODEL = "gemini-4-hydrogen";
+
+// 요청 1건 동안의 Gemini 호출 수와 토큰 합계. 응답을 읽는 곳에서 recordUsage로 더한다.
+export interface Usage {
+  calls: number;
+  input: number;
+  cached: number;
+  output: number;
+  thoughts: number;
+  searches: number;
+}
+const usageStore = new AsyncLocalStorage<Usage>();
+
+// ponytail: Standard 요금 고정값 (USD / 100만 토큰, 검색은 쿼리 1건). 요금이 바뀌면 여기만 고친다. 검색 월 5,000건 무료분은 빼지 않는다.
+const PRICE = { input: 1.5, cached: 0.075, output: 7.5, search: 0.014 };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function recordUsage(json: any) {
+  const u = usageStore.getStore();
+  const m = json?.usageMetadata;
+  if (!u || !m) return;
+  const cand = json.candidates?.[0];
+  // 검색 쿼리는 groundingMetadata에 오고, 서버 도구 호출 모드에서는 toolCall 파트에 온다
+  const toolQueries = (cand?.content?.parts || [])
+    .filter((p: { toolCall?: { toolType?: string } }) => p?.toolCall?.toolType === "GOOGLE_SEARCH_WEB")
+    .reduce((n: number, p: { toolCall: { args?: { queries?: unknown[] } } }) => n + (p.toolCall.args?.queries?.length || 0), 0);
+  u.calls++;
+  // toolUsePromptTokenCount(검색 결과 등)는 promptTokenCount와 따로 오고 입력으로 과금된다. cached는 promptTokenCount에 포함된다.
+  u.input += (m.promptTokenCount || 0) + (m.toolUsePromptTokenCount || 0);
+  u.cached += m.cachedContentTokenCount || 0;
+  u.output += m.candidatesTokenCount || 0;
+  u.thoughts += m.thoughtsTokenCount || 0;
+  u.searches += cand?.groundingMetadata?.webSearchQueries?.length || toolQueries;
+}
+
+export const usageCost = (u: Usage) =>
+  ((u.input - u.cached) * PRICE.input + u.cached * PRICE.cached + (u.output + u.thoughts) * PRICE.output) / 1e6 +
+  u.searches * PRICE.search;
+
+// fn 안에서 일어난 Gemini 호출을 모아 끝날 때 한 줄로 서버 로그에 남긴다.
+export async function withUsage<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const u: Usage = { calls: 0, input: 0, cached: 0, output: 0, thoughts: 0, searches: 0 };
+  try {
+    return await usageStore.run(u, fn);
+  } finally {
+    console.log(`[gemini-usage] ${JSON.stringify({ label, ...u, usd: Number(usageCost(u).toFixed(4)) })}`);
+  }
+}
 
 // 추론 수준: 일반 검색·요약은 medium, 복잡한 해석은 high, 단순 분류는 low
 export type ThinkingLevel = "low" | "medium" | "high";
@@ -82,7 +131,9 @@ export interface WebSource {
 
 // 답변 본문과, 구글 검색 그라운딩을 썼다면 그 출처 목록을 함께 꺼낸다.
 export async function geminiParse(res: Response): Promise<{ text: string; sources: WebSource[] }> {
-  const cand = (await res.json())?.candidates?.[0];
+  const json = await res.json();
+  recordUsage(json);
+  const cand = json?.candidates?.[0];
   const text = (cand?.content?.parts || [])
     .map((p: { text?: string }) => p.text || "")
     .join("")
@@ -190,6 +241,9 @@ export async function streamGemini(
   let thought = "";
   const seen = new Set<string>();
   const sources: WebSource[] = [];
+  // 스트림의 usageMetadata는 누적값이라 마지막 것만 기록한다
+  let usage: unknown;
+  let queries: unknown[] | undefined;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -205,6 +259,8 @@ export async function streamGemini(
       try {
         const chunk = JSON.parse(raw);
         const cand = chunk?.candidates?.[0];
+        if (chunk?.usageMetadata) usage = chunk.usageMetadata;
+        if (cand?.groundingMetadata?.webSearchQueries) queries = cand.groundingMetadata.webSearchQueries;
         for (const p of cand?.content?.parts || []) {
           if (!p?.text) continue;
           if (p.thought) {
@@ -226,6 +282,7 @@ export async function streamGemini(
     }
   }
 
+  recordUsage({ usageMetadata: usage, candidates: [{ groundingMetadata: { webSearchQueries: queries } }] });
   return { ok: true, text: text.trim(), sources: sources.slice(0, 8) };
 }
 

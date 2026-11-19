@@ -21,6 +21,16 @@ export interface Verification {
 
 // 정부·공공기관 도메인 (정부24는 gov.kr)
 const OFFICIAL_HOST = /(^|\.)(go\.kr|or\.kr|gov\.kr)$/;
+
+// 출처 목록에 남길지: 공공기관 도메인이거나 사용자가 등록한 사이트만 (검색 출처는 제목이 도메인으로 온다)
+export function isTrustedSource(s: { title: string; url: string }, hosts: string[]) {
+  let host = "";
+  try {
+    host = new URL(s.url).hostname.replace(/^www\./, "");
+  } catch {}
+  const title = s.title.trim().toLowerCase().replace(/^www\./, "");
+  return [host, title].some((h) => OFFICIAL_HOST.test(h) || hosts.some((x) => h === x || h.endsWith("." + x)));
+}
 // "엑셀로 정리해줘", "워드 파일 만들어 줘", "csv로 뽑아줘", "캘린더 파일 줘" 같은 요청
 const WANTS_FILE =
   /(엑셀|xlsx|스프레드시트|csv|docx|워드\s*(파일|문서)|워드로|캘린더\s*파일|\bics\b|파일로|pdf로|hwp로|한글\s*파일로)[^.?!\n]{0,14}(만들|뽑|작성|정리|내보|내려|다운|저장|줘|주세요)/i;
@@ -87,7 +97,7 @@ export function verifyAnswer(
     );
 
     // 3. 판정: 대조 결과와 반대로 말하지 않는지
-    const positive = /(신청\s*대상(에|입니다|이에요|이 됩니다)|받을\s*수\s*있(어요|습니다)|자격(을|이)\s*충족)/.test(text);
+    const positive = /(신청\s*대상(에|입니다|이에요|이 됩니다)|받을\s*수\s*있(어요|습니다)|자격(을|이)\s*충족|요건(은|이|을)?\s*(맞(?!지)|충족(?!하지|되지))|맞을\s*수\s*있)/.test(text);
     const negative = /(대상이\s*아니|요건을\s*충족하지\s*못|받을\s*수\s*없|부적격)/.test(text);
     const mentionsCheck = /확인|추가|남아|필요/.test(text);
     let verdictIssue = "";
@@ -95,6 +105,10 @@ export function verifyAnswer(
     else if (s.verdict === "eligible" && negative && !positive) verdictIssue = "대조 결과는 '확인한 조건 충족'인데 대상이 아니라고 안내했습니다.";
     else if (s.verdict === "needs_check" && positive && !mentionsCheck)
       verdictIssue = "확인이 남은 조건이 있는데 확정적으로 대상이라고 안내했습니다. 남은 조건을 밝히세요.";
+    // 공고에서 확인하지 않은 공제를 적용해 소득을 낮춰 계산하면 판정이 뒤집힌다
+    const deduction = text.match(/\d+\s*%\s*(근로소득\s*)?공제/);
+    if (!verdictIssue && deduction)
+      verdictIssue = `'${deduction[0]}' 계산은 확인한 공고 기준에 없습니다. 자격 확인 결과의 금액과 판정으로 다시 쓰세요.`;
     const verdictLabel = { eligible: "확인한 조건 충족", needs_check: "확인이 더 필요", ineligible: "미충족 조건 있음" }[s.verdict];
     checks.push(
       verdictIssue

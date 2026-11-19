@@ -1,7 +1,7 @@
 // 도구 호출 에이전트 루프.
 // AI(Gemini)가 질문을 보고 어떤 도구를 쓸지 스스로 고르고, 서버가 실행한 결과를 다시 AI에 돌려준다.
 // 검색(google_search)은 Gemini 서버에서 실행되고, 나머지 도구는 이 파일에서 실행한다.
-import { callGemini, geminiError, groundSources, koreanThought, maskPii, type WebSource } from "./gemini";
+import { callGemini, geminiError, groundSources, koreanThought, maskPii, recordUsage, type WebSource } from "./gemini";
 import { judgeConditions, type ConditionField, type EligibilitySummary, type MyValues, type PolicyCondition } from "./eligibility";
 import { fetchGov24Services, type ToolExecution } from "./tools";
 import type { AuditResult } from "./docRules";
@@ -101,7 +101,7 @@ const DECLARATIONS = [
   {
     name: "make_plan",
     description:
-      "작업을 시작하기 전에 맨 먼저 한 번 호출해 실행 계획을 세운다. 사용자 목표를 이루려면 어떤 순서로 어떤 도구를 쓸지 2~5단계로 정한다. 마지막 단계는 tool을 answer로 둔다.",
+      "작업을 시작할 때 맨 먼저 한 번 호출해 실행 계획을 세운다. 사용자 목표를 이루려면 어떤 순서로 어떤 도구를 쓸지 2~5단계로 정한다. 마지막 단계는 tool을 answer로 둔다. 같은 응답에서 첫 단계 도구도 함께 호출한다.",
     parameters: {
       type: "object",
       properties: {
@@ -140,8 +140,9 @@ const DECLARATIONS = [
             properties: {
               field: {
                 type: "string",
-                enum: ["age", "income", "medianRatio", "sepMonths", "deposit", "rent"],
-                description: "age 만 나이, income 월 소득(만 원), medianRatio 기준 중위소득 대비 %, sepMonths 따로 산 개월, deposit 보증금(만 원), rent 월세(만 원)",
+                enum: ["age", "income", "medianRatio", "sepMonths", "deposit", "rent", "assets", "houses"],
+                description:
+                  "age 만 나이, income 월 소득(만 원), medianRatio 기준 중위소득 대비 %, sepMonths 따로 산 개월, deposit 보증금(만 원), rent 월세(만 원), assets 재산 합계(만 원), houses 본인 명의 주택 수(무주택 요건은 max 0)",
               },
               min: { type: "number" },
               max: { type: "number" },
@@ -154,7 +155,7 @@ const DECLARATIONS = [
         otherConditions: {
           type: "array",
           items: { type: "string" },
-          description: "숫자로 판정할 수 없어 사용자가 확인해야 할 조건 (재산, 무주택, 거주 요건 등)",
+          description: "숫자로 판정할 수 없어 사용자가 확인해야 할 조건 (거주 요건 등). 재산·무주택은 conditions의 assets·houses로 넣는다",
         },
         values: {
           type: "object",
@@ -167,6 +168,8 @@ const DECLARATIONS = [
             sepMonths: { type: "number" },
             householdIncomeManwon: { type: "number", description: "가구 월 소득 합계(만 원)" },
             householdSize: { type: "number", description: "가구원 수(본인 포함)" },
+            assetsManwon: { type: "number", description: "예금·주식·차량 등 재산 합계(만 원)" },
+            housesOwned: { type: "number", description: "본인 명의 주택 수 (무주택이면 0)" },
           },
         },
       },
@@ -365,14 +368,18 @@ const DECLARATIONS = [
 
 const AGENT_RULES = `
 [도구 사용 규칙]
-- 맨 처음에는 반드시 make_plan을 한 번 호출해 2~5단계 계획을 세우고, 그다음 계획 순서대로 도구를 쓰세요. 도중에 계획과 다른 도구가 필요하면 그냥 쓰면 됩니다.
-- 답하기 전에 필요한 도구를 스스로 고르세요: 최신 공고·금액·일정은 google_search, 정책별 자격 판정은 공고 조건을 확인한 뒤 check_eligibility, 정부 지원사업 목록은 lookup_subsidy_list, 첨부 서류 점검은 audit_documents.
+- 맨 처음 응답에서 make_plan으로 2~5단계 계획을 세우고, 같은 응답에서 첫 단계 도구도 함께 호출하세요 (계획만 세우고 멈추지 마세요). 그다음 계획 순서대로 도구를 쓰세요. 도중에 계획과 다른 도구가 필요하면 그냥 쓰면 됩니다.
+- 답하기 전에 필요한 도구를 스스로 고르세요: 정책의 금액·대상·기한은 check_policy, 정책별 자격 판정은 공고 조건을 확인한 뒤 check_eligibility, 정부 지원사업 목록은 lookup_subsidy_list, 첨부 서류 점검은 audit_documents.
 - 자격은 정책마다 다릅니다. 어떤 정책인지 모르면 묻거나 search_policies로 후보를 찾고, 고정된 일반 기준으로 판정하지 마세요. 숫자 조건을 모두 충족해도 나머지 조건이 남으면 "확인이 더 필요"라고 답하세요.
 - 판정에 꼭 필요한 정보가 [사용자 정보]와 대화에 없으면 추측하지 말고 ask_user로 한 가지만 물으세요.
+- 사용자가 말한 사정(주택 보유, 재산, 혼인, 나이 등)이 공고의 자격 조건과 관련되면 그 조건부터 conditions에 넣어 판정하세요. 이미 미충족 조건이 있으면 다른 정보를 묻지 말고 안 되는 이유와 대안으로 답하세요.
+- 공고 원문이나 검색 결과에 없는 공제·환산·예외 규칙(예: 근로소득 공제율)을 만들어 계산하지 마세요. 확인한 산정 방식이 없으면 사용자가 말한 금액을 그대로 쓰고, 실제 산정 방식은 접수 기관에서 확인하라고 caution에 쓰세요.
+- 사용자가 사업 이름을 말하면 그 사업의 기준으로 판정하세요. 이름이 비슷한 다른 사업(예: 국토교통부 청년월세 지원과 서울시 청년월세지원)의 기준을 섞지 말고, 지자체 사업은 따로 밝혀 대안이나 추가 안내로 넣으세요.
 - 도구 결과에 "추가로필요한정보"가 있으면 최종 답을 내지 말고 바로 ask_user로 그 정보를 물으세요. "확인 필요"를 신청 단계나 주의 문구로 미루지 마세요.
 - 사용자 정보의 값이 0이면 0으로 계산하세요. 값이 아예 없을 때만 묻습니다.
 - 도구 결과의 수치를 그대로 쓰고, 도구 결과와 검색 결과가 다르면 둘 다 밝히세요.
 - 특정 정책의 금액·대상·기한을 말하기 전에 check_policy로 공식 원문을 확인하세요. 기록이 여러 개면 최근 수정된 원문을 따르고, 답변에서 다룬 정책은 policies에 넣으세요. 원문이 없을 때만 google_search 결과를 쓰세요.
+- google_search는 check_policy가 원문을 찾지 못했을 때, 원문에 없는 최신 변경이나 정책 밖 사실이 필요할 때만 쓰세요. 검색어는 한 번에 2개 이내로 쓰고, 이미 확인한 내용을 다시 검색하지 마세요.
 - 검수에서 끝내지 말고 실행까지 이어 주세요: audit_documents를 썼다면 create_checklist로 제출 직전 체크리스트를 만들고, 보완에 설명이 필요하면(주소 불일치, 서류 지연 등) create_draft로 소명서·사유서 초안을 쓰세요.
 - 사용자가 사유서·자기소개서·계획서 작성을 원하면 create_draft, 신청 준비·제출 방법을 물으면 create_checklist를 쓰세요.
 - 안 된다는 결론(자격 미달, 대상 제외, 마감, 예산 소진)에서 멈추지 마세요. 왜 안 되는지 밝히고, 사용자가 진짜 이루려던 목적을 정한 뒤 find_alternatives를 호출하세요. 전국 제도까지 확인이 필요하면 google_search도 쓰세요.
@@ -479,8 +486,13 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
       toolConfig: { includeServerSideToolInvocations: true },
     }),
     // Gemini 3 계열은 temperature를 낮추면 도구 호출이 반복될 수 있어 기본값을 둔다
-    generationConfig: { thinkingConfig: { thinkingLevel: level, includeThoughts: true } },
+    generationConfig: { thinkingConfig: { thinkingLevel: !withTools || answerTurn() ? level : "low", includeThoughts: true } },
   });
+  // 도구를 고르는 차례는 low 추론으로 아끼고, 답을 쓸 차례에만 고른 추론 수준을 쓴다.
+  // ponytail: 계획에 남은 단계로 답할 차례를 추정한다. 건너뛰기 쉬운 검색·되묻기는 남아 있어도 답할 차례로 본다.
+  // 그래도 AI가 계획 단계를 건너뛰고 바로 답하면 그 답은 low로 쓰인다. 답 품질이 떨어지면 low 답을 고른 수준으로 다시 쓰게 한다.
+  const answerTurn = () =>
+    verifyRetried || (plan.length > 0 && plan.every((x) => x.done || ["answer", "google_search", "ask_user"].includes(x.tool)));
 
   show("AI가 목표를 보고 실행 계획을 세우고 있습니다...");
 
@@ -488,7 +500,9 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
     // 마지막 차례에는 도구 없이 답만 받는다
     const res = await callGemini(key, body(turn < MAX_TURNS - 1));
     if (!res.ok) return { ok: false, error: await geminiError(res), traces };
-    const cand = (await res.json())?.candidates?.[0];
+    const json = await res.json();
+    recordUsage(json);
+    const cand = json?.candidates?.[0];
     const parts: Record<string, any>[] = cand?.content?.parts || []; // eslint-disable-line @typescript-eslint/no-explicit-any
 
     const thought = parts
@@ -621,7 +635,10 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
     contents.push(cand.content);
     const responses: Record<string, unknown>[] = [];
 
-    for (const p of calls) {
+    // make_plan을 첫 도구와 같은 차례에 부르면 계획부터 저장해야 그 도구가 계획 단계에 체크된다. 응답은 호출 순서대로 돌려준다.
+    const isPlan = (i: number) => Number(calls[i].functionCall.name === "make_plan");
+    for (const i of calls.map((_, i) => i).sort((a, b) => isPlan(b) - isPlan(a))) {
+      const p = calls[i];
       const { name, args = {}, id } = p.functionCall as { name: string; args?: Record<string, unknown>; id?: string };
       let response: Record<string, unknown>;
 
@@ -647,7 +664,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           status: "done",
         });
         show(`계획: ${plan.map((x) => x.label).join(" → ")}`);
-        response = { saved: true, note: "계획을 저장했습니다. 이제 계획 순서대로 도구를 실행하세요." };
+        response = { saved: true, note: "계획을 저장했습니다. 남은 단계를 계획 순서대로 실행하세요." };
       } else if (name === "find_alternatives") {
         const goal = String(args.goal || "").slice(0, 40);
         const blocked = String(args.blockedPolicy || "").slice(0, 40);
@@ -805,7 +822,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           const x = v === "" || v === null || v === undefined ? NaN : Number(v);
           return Number.isFinite(x) && x >= 0 ? x : undefined;
         };
-        const FIELDS: ConditionField[] = ["age", "income", "medianRatio", "sepMonths", "deposit", "rent"];
+        const FIELDS: ConditionField[] = ["age", "income", "medianRatio", "sepMonths", "deposit", "rent", "assets", "houses"];
         const conditions: PolicyCondition[] = (Array.isArray(args.conditions) ? args.conditions : [])
           .map((c: Record<string, unknown>) => ({
             field: c?.field as ConditionField,
@@ -817,7 +834,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           .filter((c: PolicyCondition) => FIELDS.includes(c.field) && c.label && (c.min !== undefined || c.max !== undefined))
           .slice(0, 8);
         const said = (args.values || {}) as Record<string, unknown>;
-        const keys: (keyof MyValues)[] = ["age", "incomeManwon", "depositManwon", "rentManwon", "sepMonths", "householdIncomeManwon", "householdSize"];
+        const keys: (keyof MyValues)[] = ["age", "incomeManwon", "depositManwon", "rentManwon", "sepMonths", "householdIncomeManwon", "householdSize", "assetsManwon", "housesOwned"];
         const values: MyValues = { ...input.myValues };
         for (const k of keys) {
           const v = number(said[k]);
@@ -968,6 +985,12 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
             status: "done",
           });
         }
+      } else if (name === "ask_user" && summary?.verdict === "ineligible") {
+        // 이미 미충족 조건이 있으면 어떤 답을 받아도 결론이 같으므로 묻지 않는다
+        response = {
+          asked: false,
+          note: `${summary.policyName}은 이미 미충족 조건이 있어 더 묻지 않습니다. 안 되는 이유를 밝히고 find_alternatives로 대안을 찾아 최종 답을 내세요.`,
+        };
       } else if (name === "ask_user") {
         const ask: AgentAsk = {
           question: String(args.question || "추가 정보가 필요합니다.").slice(0, 80),
@@ -1003,7 +1026,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         response = { error: `알 수 없는 도구: ${name}` };
       }
 
-      responses.push({ functionResponse: { ...(id && { id }), name, response } });
+      responses[i] = { functionResponse: { ...(id && { id }), name, response } };
     }
 
     contents.push({ role: "user", parts: responses });

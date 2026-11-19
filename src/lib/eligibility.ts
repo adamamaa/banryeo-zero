@@ -3,7 +3,7 @@
 import { medianRatioPercent } from "./standards";
 import { amountsIn, pickOfficial, type OfficialRecord } from "./officialFacts";
 
-export type ConditionField = "age" | "income" | "medianRatio" | "sepMonths" | "deposit" | "rent";
+export type ConditionField = "age" | "income" | "medianRatio" | "sepMonths" | "deposit" | "rent" | "assets" | "houses";
 
 export interface PolicyCondition {
   field: ConditionField;
@@ -22,6 +22,9 @@ export interface MyValues {
   sepMonths?: number;
   householdIncomeManwon?: number;
   householdSize?: number;
+  // 재산 합계(만 원)와 본인 명의 주택 수
+  assetsManwon?: number;
+  housesOwned?: number;
 }
 
 export interface EligibilityCheck {
@@ -66,6 +69,8 @@ function numbersBefore(text: string, unit: string) {
 function inOfficial(c: PolicyCondition, rec: OfficialRecord) {
   const text = `${rec.benefit} ${rec.target}`;
   const values = [c.min, c.max].filter((v): v is number => v !== undefined);
+  // 무주택 조건은 숫자 없이 "무주택"으로만 적혀 있다
+  if (c.field === "houses") return c.max === 0 && /무주택/.test(text);
   const pool =
     c.field === "age"
       ? numbersBefore(text, "세")
@@ -84,6 +89,8 @@ const MISSING: Record<ConditionField, string> = {
   sepMonths: "부모님과 따로 산 기간",
   deposit: "보증금",
   rent: "월세",
+  assets: "재산 합계",
+  houses: "본인 명의 주택 보유 여부",
 };
 
 export function judgeConditions(input: {
@@ -130,8 +137,11 @@ export function judgeConditions(input: {
     } else if (c.field === "sepMonths") {
       mine = v.sepMonths;
       shown = mine === undefined ? "" : `${mine}개월`;
+    } else if (c.field === "houses") {
+      mine = v.housesOwned;
+      shown = mine === undefined ? "" : mine ? `주택 ${mine}채 보유` : "무주택";
     } else {
-      mine = c.field === "deposit" ? v.depositManwon : v.rentManwon;
+      mine = c.field === "deposit" ? v.depositManwon : c.field === "rent" ? v.rentManwon : v.assetsManwon;
       shown = mine === undefined ? "" : man(mine);
     }
     const status: EligibilityCheck["status"] =
@@ -152,7 +162,8 @@ export function judgeConditions(input: {
   }
 
   if (!checks.length && !others.length) return { rejected, missing, summary: undefined };
-  const verdict: EligibilitySummary["verdict"] = checks.some((c) => c.status === "fail")
+  const failed = checks.some((c) => c.status === "fail");
+  const verdict: EligibilitySummary["verdict"] = failed
     ? "ineligible"
     : checks.length && checks.every((c) => c.status === "pass") && !others.length
     ? "eligible"
@@ -165,5 +176,6 @@ export function judgeConditions(input: {
     basis: official ? `${official.source} ${official.updated} 수정 원문 기준` : `${otherEvidenceLabel}에서 확인한 조건 기준`,
     percents,
   };
-  return { rejected, missing: Array.from(new Set(missing)), summary };
+  // 이미 미충족 조건이 있으면 더 물을 필요가 없다 (어떤 답이 와도 결론이 같다)
+  return { rejected, missing: failed ? [] : Array.from(new Set(missing)), summary };
 }

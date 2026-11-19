@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callGemini, streamGemini, geminiText, geminiParse, geminiError, isFatalGeminiStatus, koreanThought, maskPii, GEMINI_MODEL, chooseReasoning, type Reasoning } from "@/lib/gemini";
+import { callGemini, streamGemini, geminiText, geminiParse, geminiError, isFatalGeminiStatus, koreanThought, maskPii, GEMINI_MODEL, chooseReasoning, withUsage, type Reasoning } from "@/lib/gemini";
 import type { AuditResult } from "@/lib/docRules";
 import { fetchGov24Services, subsidyKeyword, type ToolExecution } from "@/lib/tools";
 import { CARD_FORMAT, parseCard, parsePolicy, cardToText, type PolicyDetail } from "@/lib/card";
@@ -11,6 +11,7 @@ import { resolveAlternatives } from "@/lib/alternatives";
 import { downloadName, fileMeta } from "@/lib/fileExport";
 import { applyOfficial } from "@/lib/officialFacts";
 import { byDeadline, localYmd } from "@/lib/deadline";
+import { isTrustedSource } from "@/lib/verify";
 
 interface UploadedDoc {
   fileName: string;
@@ -383,12 +384,12 @@ export async function POST(req: NextRequest) {
 
       if (wantStream) {
         return sseResponse(async (emit) => {
-          const out = await runAudit(emit);
+          const out = await withUsage("audit", () => runAudit(emit));
           if (out.status >= 400) emit("error", { ...out.payload, status: out.status });
           else emit("result", out.payload);
         });
       }
-      const out = await runAudit();
+      const out = await withUsage("audit", () => runAudit());
       return NextResponse.json(out.payload, { status: out.status });
     }
 
@@ -596,7 +597,7 @@ export async function POST(req: NextRequest) {
               {
                 text: `당신은 청년 정책과 지원금 신청을 돕는 에이전트 '반려제로'입니다. 정책 상담이 중심이지만 사용자가 맡기는 다른 일(글쓰기, 번역, 요약, 표 정리, 파일 만들기 등)도 직접 끝까지 처리합니다. 사용자가 다른 언어를 지정하지 않으면 한국어로 간결하게 답하세요.
 - 실제 신청 전에는 공식 공고를 확인하라고 안내하세요.
-- 정책의 자격, 금액, 기한, 신청 방법은 검색으로 확인한 뒤 답하세요. 검색할 때 [등록된 사이트]의 도메인을 먼저 살펴보세요.
+- 정책의 자격, 금액, 기한, 신청 방법은 공식 원문이나 검색으로 확인한 뒤 답하세요. 검색할 때 [등록된 사이트]의 도메인을 먼저 살펴보세요.
 - [계산·조회 결과]가 있으면 그 수치만 쓰고 새로 만들지 마세요.
 - [사용자 정보]가 있으면 그 조건(지역, 나이, 하는 일, 소득, 주거, 혼인·자녀, 학력·병역, 재산, 우대 조건, 관심 분야)에 맞는 정책과 자격 여부를 우선해 답하고, 조건 때문에 안 되는 정책은 왜 안 되는지 짧게 밝히세요. 병역을 마친 경우 공고의 연령 연장 규정을, 우대 조건이 있으면 가점·우선 선발 여부를 함께 확인하세요.
 - [첨부 문서]가 있으면 그 내용을 근거로 답하고, 문서에 없는 내용은 없다고 말하세요.
@@ -688,8 +689,11 @@ ${CARD_FORMAT}`,
             const card =
               parsed &&
               applyOfficial(resolveAlternatives(parsed, out.alternatives || [], out.summary?.verdict === "ineligible"), out.official || []);
+            // 공공기관·등록 사이트가 아닌 검색 출처는 화면에 내보내지 않는다
+            const hosts = sites.map((x) => x.host);
             const cited = out.sources
               .filter((s, i) => out.sources.findIndex((x) => x.title === s.title) === i)
+              .filter((s) => isTrustedSource(s, hosts))
               .map((s) => ({ ...s, registered: sites.some((x) => s.title.includes(x.host) || s.url.includes(x.host)) }));
             return {
               status: 200,
@@ -714,6 +718,7 @@ ${CARD_FORMAT}`,
             };
           }
           failure = out.error;
+          console.log(`[agent-fallback] ${failure}`);
         }
         for (const tools of [[{ google_search: {} }, { url_context: {} }], [{ google_search: {} }], null]) {
           try {
@@ -752,6 +757,8 @@ ${CARD_FORMAT}`,
 
             const card = parseCard(text, sites);
             if (!text) continue;
+            // 에이전트가 실패해 검색만으로 답했으면 자격 판정이 아니라고 밝힌다
+            if (card && agentMode) card.caution = "자격 확인 도구를 거치지 않은 검색 답변이라 참고용입니다. 다시 물어보면 판정할 수 있어요.";
             const compiled = noticeMode ? card?.policies[0] : undefined;
             if (compiled) {
               const special = compiled.conditions.filter((c) => /\(특례\)/.test(c)).length;
@@ -771,7 +778,11 @@ ${CARD_FORMAT}`,
                 status: "done",
               });
             }
-            const cited = sources.filter((s, i) => sources.findIndex((x) => x.title === s.title) === i).map((s) => ({
+            const hosts = sites.map((x) => x.host);
+            const cited = sources
+              .filter((s, i) => sources.findIndex((x) => x.title === s.title) === i)
+              .filter((s) => isTrustedSource(s, hosts))
+              .map((s) => ({
               ...s,
               registered: sites.some((x) => s.title.includes(x.host) || s.url.includes(x.host)),
             }));
@@ -818,12 +829,12 @@ ${CARD_FORMAT}`,
 
       if (wantStream) {
         return sseResponse(async (emit) => {
-          const out = await runChat(emit);
+          const out = await withUsage("agent_chat", () => runChat(emit));
           if (out.status >= 400) emit("error", { ...out.payload, status: out.status });
           else emit("result", out.payload);
         });
       }
-      const out = await runChat();
+      const out = await withUsage("agent_chat", () => runChat());
       return NextResponse.json(out.payload, { status: out.status });
     }
 
