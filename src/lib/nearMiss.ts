@@ -34,7 +34,13 @@ export interface GenericNearMissItem {
   title: string;
   detail: string;
 }
-type LimitLike = { field: "age" | "income" | "medianRatio" | "sepMonths" | "deposit" | "rent"; min?: number; max?: number; label: string };
+type LimitLike = {
+  field: "age" | "income" | "medianRatio" | "sepMonths" | "deposit" | "rent";
+  min?: number;
+  max?: number;
+  label: string;
+  deductPercent?: number;
+};
 
 // 받침이 있으면 "을", 없으면 "를"
 const withObject = (word: string) => {
@@ -63,11 +69,14 @@ export function limitNearMiss(
       continue;
     }
     const area = AREA[l.field];
-    const detail = `조건: ${l.label}`;
-    const incomeWon = (p.incomeManwon || 0) * 10000;
+    const isMoney = l.field === "income" || l.field === "medianRatio";
+    // 공제해 계산하는 공고면 공제 후 소득으로 비교하고, 늘리고 줄일 금액은 세전 금액으로 되돌려 보여 준다
+    const keep = isMoney && l.deductPercent ? 1 - Math.min(l.deductPercent, 50) / 100 : 1;
+    const detail = `조건: ${l.label}${keep < 1 ? ` (소득 ${l.deductPercent}% 공제 후 기준)` : ""}`;
+    const incomeWon = (p.incomeManwon || 0) * 10000 * keep;
     // 소득 조건은 원 단위로 비교한다 (medianRatio는 1인 가구 기준 중위소득으로 환산)
     const toWon = (v: number) => (l.field === "medianRatio" ? (v / 100) * median : v * 10000);
-    const isMoney = l.field === "income" || l.field === "medianRatio";
+    const gross = (won: number) => won / keep;
     const v = isMoney ? incomeWon : raw;
 
     if (l.max !== undefined) {
@@ -75,7 +84,7 @@ export function limitNearMiss(
       if (v > max) {
         const over = v - max;
         items.push(
-          isMoney ? { kind: "fix", area, title: `월 소득이 ${won(over)} 줄면 충족`, detail }
+          isMoney ? { kind: "fix", area, title: `월 소득이 ${won(gross(over))} 줄면 충족`, detail }
           : l.field === "age" ? { kind: "fail", area, title: `만 ${l.max}세까지만 대상 (지금 만 ${raw}세)`, detail }
           : l.field === "sepMonths" ? { kind: "fail", area, title: `${l.max}개월 이하만 대상 (지금 ${raw}개월)`, detail }
           : { kind: "fix", area, title: `${withObject(area)} ${over.toLocaleString("ko-KR")}만 원 낮추면 충족`, detail }
@@ -89,7 +98,7 @@ export function limitNearMiss(
           kind: tight ? "risk" : "margin",
           area,
           title: isMoney
-            ? `소득 상한까지 월 ${won(gap)} 여유`
+            ? `소득 상한까지 월 ${won(gross(gap))} 여유`
             : l.field === "age"
             ? gap < 1 ? `올해가 마지막 (만 ${l.max}세까지)` : `만 ${l.max}세까지 ${gap}년 남음`
             : l.field === "sepMonths"
@@ -104,7 +113,7 @@ export function limitNearMiss(
       if (v < min) {
         const short = min - v;
         items.push(
-          isMoney ? { kind: "fix", area, title: `월 소득이 ${won(short)} 늘면 충족`, detail }
+          isMoney ? { kind: "fix", area, title: `월 소득이 ${won(gross(short))} 늘면 충족`, detail }
           : l.field === "age" ? { kind: "fix", area, title: `만 ${l.min}세부터 대상 · ${short}년 뒤 신청 가능`, detail }
           : l.field === "sepMonths"
           ? { kind: "fix", area, title: `${short}개월 더 따로 살면 충족 (${monthLabel(short, today)})`, detail }

@@ -4,6 +4,7 @@ import { isNegativeAnswer, parseCard } from "./card";
 import { resolveAlternatives, type AltCandidate } from "./alternatives";
 import { benefitExcerpt, findAmountIssues, pickOfficial, type OfficialRecord } from "./officialFacts";
 import type { EligibilitySummary } from "./eligibility";
+import { localYmd } from "./deadline";
 
 export interface VerifyCheck {
   name: string;
@@ -63,8 +64,9 @@ export function verifyAnswer(
   } = {}
 ): VerifyCheck[] {
   const checks: VerifyCheck[] = [];
-  const today = opts.today ?? new Date();
-  const todayYmd = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  // 날짜 비교는 한국 시간 기준 (프롬프트에 알려 준 오늘과 같게)
+  const [ty, tm, td] = localYmd(opts.today ?? new Date()).split("-").map(Number);
+  const todayYmd = new Date(ty, tm - 1, td);
   const s = opts.summary;
   const hosts = opts.hosts ?? [];
 
@@ -125,14 +127,15 @@ export function verifyAnswer(
     const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
     if (Number.isNaN(d.getTime()) || d >= todayYmd) continue;
     const around = text.slice(Math.max(0, (m.index ?? 0) - 20), (m.index ?? 0) + m[0].length + 20);
-    if (/(마감|까지|기한)/.test(around) && !/(마감됐|마감되었|마감된|종료|지났|끝났|이미|지난|불가)/.test(around)) past.push(m[0].trim());
+    // "마감됐다", "차기 공고 확인"처럼 이미 끝났다고 밝힌 문맥은 제외한다
+    if (/(마감|까지|기한)/.test(around) && !/(마감됐|마감되었|마감된|종료|지났|끝났|이미|지난|불가|차기|다음\s*(공고|모집|접수)|내년|재공고)/.test(around)) past.push(m[0].trim());
   }
   checks.push(
     past.length
       ? {
           name: "날짜",
           ok: false,
-          note: `오늘(${today.getFullYear()}.${today.getMonth() + 1}.${today.getDate()}) 기준 이미 지난 마감일(${past.join(", ")})을 신청 가능한 것처럼 안내했습니다. 마감됐다고 밝히고 다음 접수 일정이나 확인 방법을 안내하세요.`,
+          note: `오늘(${ty}.${tm}.${td}) 기준 이미 지난 마감일(${past.join(", ")})을 신청 가능한 것처럼 안내했습니다. 마감됐다고 밝히고 다음 접수 일정이나 확인 방법을 안내하세요.`,
           severity: "fix",
         }
       : { name: "날짜", ok: true, note: "지난 마감일을 신청 가능처럼 안내하지 않음", severity: "fix" }

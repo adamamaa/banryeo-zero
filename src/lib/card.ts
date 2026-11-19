@@ -17,6 +17,8 @@ export interface PolicyLimit {
   min?: number;
   max?: number;
   label: string;
+  // 소득을 공제해 계산하는 공고의 공제율(%) (예: 소득평가액 30)
+  deductPercent?: number;
 }
 const LIMIT_FIELDS: LimitField[] = ["age", "income", "medianRatio", "sepMonths", "deposit", "rent"];
 
@@ -73,14 +75,14 @@ export const CARD_FORMAT = `다른 글 없이 아래 JSON 객체 하나만 출�
     "deadline": "신청 기한·시기 (20자 이내, 모르면 빈 문자열)",
     "applyAt": "신청하는 곳 (15자 이내)",
     "asOf": "정보 기준 시점과 출처 (예: 2026년 고용24 안내, 20자 이내)",
-    "limits": [{ "field": "age | income | medianRatio | sepMonths | deposit | rent", "min": 숫자 또는 null, "max": 숫자 또는 null, "label": "조건 요약 (20자 이내)" }],
+    "limits": [{ "field": "age | income | medianRatio | sepMonths | deposit | rent", "min": 숫자 또는 null, "max": 숫자 또는 null, "label": "조건 요약 (20자 이내)", "deductPercent": 소득 공제율 숫자 또는 null }],
     "conditions": ["자격 조건 하나 (25자 이내)"],
     "documents": [{ "name": "필요 서류 이름", "where": "발급처 (예: 정부24)" }]
   }]
 }
 alternatives는 원하는 지원이 안 될 때만 최대 3개 넣고, 그 외에는 빈 배열로 두세요.
 facts·steps는 최대 4개, links·followUps·policies는 최대 3개, 정책마다 conditions는 최대 5개, documents는 최대 6개입니다.
-limits에는 숫자로 판정되는 자격 조건만 넣으세요: age는 만 나이, income은 본인 월 소득(만 원), medianRatio는 기준 중위소득 대비 %, sepMonths는 부모님과 따로 산 개월 수, deposit·rent는 보증금·월세(만 원). 가구 기준 조건이면 label에 "가구 기준"이라고 쓰세요. 숫자 조건이 없으면 빈 배열로 두세요.
+limits에는 숫자로 판정되는 자격 조건만 넣으세요: age는 만 나이, income은 본인 월 소득(만 원), medianRatio는 기준 중위소득 대비 %, sepMonths는 부모님과 따로 산 개월 수, deposit·rent는 보증금·월세(만 원). 화면이 본인 정보로 바로 비교하므로, 가구 소득 조건과 특례처럼 일부 경로에만 해당하는 조건은 넣지 마세요. 소득을 공제해 계산하는 공고면 income·medianRatio에 deductPercent(예: 30)를 넣으세요. 숫자 조건이 없으면 빈 배열로 두세요.
 policies에는 답변에서 다룬 실제 정책만 넣고, 조건과 서류는 검색으로 확인한 것만 쓰세요. 정책을 다루지 않는 질문이면 빈 배열로 두세요. 해당 없는 항목은 빈 배열로 두세요.`;
 
 // 카드의 짧은 항목은 글자 그대로 표시하므로 굵게 표시(**)를 뗀다
@@ -119,8 +121,15 @@ export function parsePolicy(p: Record<string, unknown>): PolicyDetail | null {
         const field = LIMIT_FIELDS.includes(l?.field) ? (l.field as LimitField) : null;
         const min = num(l?.min);
         const max = num(l?.max);
+        const deduct = num(l?.deductPercent);
         return field && (min !== undefined || max !== undefined)
-          ? { field, ...(min !== undefined && { min }), ...(max !== undefined && { max }), label: str(l?.label, 40) || field }
+          ? {
+              field,
+              ...(min !== undefined && { min }),
+              ...(max !== undefined && { max }),
+              label: str(l?.label, 40) || field,
+              ...(deduct && (field === "income" || field === "medianRatio") && { deductPercent: Math.min(deduct, 50) }),
+            }
           : null;
       })
       .filter((l): l is PolicyLimit => Boolean(l))

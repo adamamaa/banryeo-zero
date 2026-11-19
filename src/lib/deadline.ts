@@ -6,7 +6,8 @@ export const PERIOD_UNKNOWN = "신청 기간은 공고문 확인";
 const pad = (n: number) => String(n).padStart(2, "0");
 const ymd = (y: number, m: number, d: number) =>
   m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}-${pad(m)}-${pad(d)}` : undefined;
-export const localYmd = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// 한국 시간 기준 날짜 (서버는 UTC로 돌아서 그냥 쓰면 오전 9시 전에는 하루 전 날짜가 된다)
+export const localYmd = (d = new Date()) => new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 
 // "2026. 12. 1.(월) ~ 12. 19.(금)", "2026.3.30.~2026.5.29.", "20260101~20261231", "2026-12-31까지", "상시신청" 등을 날짜로 바꾼다
 export function parseApplyPeriod(text: string): { start?: string; end?: string } {
