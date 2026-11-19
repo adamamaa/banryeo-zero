@@ -126,7 +126,15 @@ export function verifyAnswer(
   for (const m of Array.from(text.matchAll(/(20\d{2})\s*[.\-년]\s*(\d{1,2})\s*[.\-월]\s*(\d{1,2})\s*일?/g))) {
     const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
     if (Number.isNaN(d.getTime()) || d >= todayYmd) continue;
-    const around = text.slice(Math.max(0, (m.index ?? 0) - 20), (m.index ?? 0) + m[0].length + 20);
+    const end = (m.index ?? 0) + m[0].length;
+    // "5월 29일 접수 마감", "2026.5.29.(금) 마감"처럼 날짜 바로 뒤에 마감이 오면 마감 사실을 말한 것이고,
+    // "2026.3.30.~2026.5.29."의 앞 날짜는 기간의 시작일이라 마감일이 아니다
+    const after = text.slice(end, end + 14);
+    // 다만 "마감이니 서두르세요"처럼 뒤에서 아직 신청할 수 있다고 말하면 잡는다
+    const stillOpen = /(서두르|신청하세요|신청\s*가능|접수\s*중|진행\s*중|남았|놓치지)/.test(text.slice(end, end + 30));
+    if (!stillOpen && /^[.\s]*(\([월화수목금토일]\))?\s*((접수|신청|모집)\s*)?마감/.test(after)) continue;
+    if (/^[.\s]*(\([월화수목금토일]\))?\s*[~∼～–]/.test(after)) continue;
+    const around = text.slice(Math.max(0, (m.index ?? 0) - 20), end + 20);
     // "마감됐다", "차기 공고 확인"처럼 이미 끝났다고 밝힌 문맥은 제외한다
     if (/(마감|까지|기한)/.test(around) && !/(마감됐|마감되었|마감된|종료|지났|끝났|이미|지난|불가|차기|다음\s*(공고|모집|접수)|내년|재공고)/.test(around)) past.push(m[0].trim());
   }
