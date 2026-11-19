@@ -486,13 +486,8 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
       toolConfig: { includeServerSideToolInvocations: true },
     }),
     // Gemini 3 계열은 temperature를 낮추면 도구 호출이 반복될 수 있어 기본값을 둔다
-    generationConfig: { thinkingConfig: { thinkingLevel: !withTools || answerTurn() ? level : "low", includeThoughts: true } },
+    generationConfig: { thinkingConfig: { thinkingLevel: level, includeThoughts: true } },
   });
-  // 도구를 고르는 차례는 low 추론으로 아끼고, 답을 쓸 차례에만 고른 추론 수준을 쓴다.
-  // ponytail: 계획에 남은 단계로 답할 차례를 추정한다. 건너뛰기 쉬운 검색·되묻기는 남아 있어도 답할 차례로 본다.
-  // 그래도 AI가 계획 단계를 건너뛰고 바로 답하면 그 답은 low로 쓰인다. 답 품질이 떨어지면 low 답을 고른 수준으로 다시 쓰게 한다.
-  const answerTurn = () =>
-    verifyRetried || (plan.length > 0 && plan.every((x) => x.done || ["answer", "google_search", "ask_user"].includes(x.tool)));
 
   show("AI가 목표를 보고 실행 계획을 세우고 있습니다...");
 
