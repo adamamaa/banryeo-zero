@@ -519,7 +519,9 @@ export default function Page() {
   const uploadFields = uploadAudit?.autoFilledFields || [];
 
   const display = (v: string) =>
-    maskOnScreen ? v.replace(/(\d{6})-([1-4])\d{6}/g, "$1-$2******") : v;
+    maskOnScreen
+      ? v.replace(/(?<!\d)(\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))\s*-?\s*([1-8])\d{6}(?!\d)/g, "$1-$2******")
+      : v;
 
   // Gemini 키는 서버(.env.local)에만 둔다. 브라우저는 연결 상태만 확인한다.
   const verifyKey = async () => {

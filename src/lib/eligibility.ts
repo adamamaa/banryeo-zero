@@ -109,6 +109,11 @@ export function judgeConditions(input: {
   otherEvidenceLabel: string;
 }) {
   const { policyName, conditions, others, values: v, records, otherEvidence, otherEvidenceLabel } = input;
+  // 소득 산정 방식(공제율)은 정책 하나에 하나다. AI가 일부 소득 조건에만 넣어도 모든 소득 조건에 적용한다
+  const policyDeduct = Math.max(
+    0,
+    ...conditions.filter((c) => c.field === "income" || c.field === "medianRatio").map((c) => c.deductPercent || 0)
+  );
   const official = pickOfficial(records)[0];
   const checks: EligibilityCheck[] = [];
   const rejected: string[] = [];
@@ -134,7 +139,7 @@ export function judgeConditions(input: {
       shown = mine === undefined ? "" : `만 ${mine}세`;
     } else if (c.field === "income" || c.field === "medianRatio") {
       const gross = c.household ? v.householdIncomeManwon : v.incomeManwon;
-      const deduct = Math.min(Math.max(c.deductPercent || 0, 0), 50);
+      const deduct = Math.min(Math.max(c.deductPercent || policyDeduct, 0), 50);
       const income = gross === undefined ? undefined : Math.round(gross * (100 - deduct)) / 100;
       // 공제를 적용했으면 원래 금액과 공제 후 금액을 함께 보여 준다
       const amount = gross === undefined ? "" : deduct ? `월 ${man(gross)} → ${deduct}% 공제 후 ${man(income!)}` : `월 ${man(gross)}`;

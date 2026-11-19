@@ -103,9 +103,10 @@ async function auditWithPolicy(key: string, policy: PolicyDetail, docs: Uploaded
 
 function normalizeAudit(raw: Partial<AuditResult>, reference = "서류 공통 점검"): AuditResult {
   const mask = (v: unknown) => maskPii(String(v ?? "")).masked;
-  const findings = (Array.isArray(raw.findings) ? raw.findings : []).filter(
-    (f) => f && f.severity !== "pass"
-  );
+  // AI가 결과 문장에 서류의 번호를 그대로 옮겨 쓸 수 있어 화면에 나가는 글은 모두 가린다
+  const findings = (Array.isArray(raw.findings) ? raw.findings : [])
+    .filter((f) => f && f.severity !== "pass")
+    .map((f) => ({ ...f, title: mask(f.title), detail: mask(f.detail), fixAction: mask(f.fixAction) }));
   const documents = (Array.isArray(raw.documents) ? raw.documents : []).map((d) => ({
     ...d,
     fields: (Array.isArray(d.fields) ? d.fields : []).map((f) => ({ ...f, value: mask(f.value) })),
@@ -131,7 +132,12 @@ function normalizeAudit(raw: Partial<AuditResult>, reference = "서류 공통 �
             fixAction: "제출 탭 아래 신청 패키지에서 자동 기입된 신청서를 확인하세요.",
           },
         ],
-    crossCheckMatrix: Array.isArray(raw.crossCheckMatrix) ? raw.crossCheckMatrix : [],
+    crossCheckMatrix: (Array.isArray(raw.crossCheckMatrix) ? raw.crossCheckMatrix : []).map((c) => ({
+      ...c,
+      sourceA: mask(c.sourceA),
+      sourceB: mask(c.sourceB),
+      note: mask(c.note),
+    })),
     autoFilledFields: (Array.isArray(raw.autoFilledFields) ? raw.autoFilledFields : []).map((f) => ({
       ...f,
       value: mask(f.value),

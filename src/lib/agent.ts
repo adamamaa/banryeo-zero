@@ -157,7 +157,7 @@ const DECLARATIONS = [
               },
               deductPercent: {
                 type: "number",
-                description: "income·medianRatio 조건에서 공고가 근로·사업소득을 공제해 소득을 계산하면 그 공제율(%). 예: 소득평가액 30. 공고·검색에서 확인한 경우만 넣는다",
+                description: "income·medianRatio 조건에서 공고가 근로·사업소득을 공제해 소득을 계산하면 그 공제율(%). 예: 소득평가액 30. 공고·검색에서 확인한 경우만 넣는다. 한 조건에 넣으면 이 정책의 모든 소득 조건(특례의 소득 하한 포함)에 적용된다",
               },
               group: {
                 type: "string",
