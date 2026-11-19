@@ -719,6 +719,8 @@ ${CARD_FORMAT}`,
           }
           failure = out.error;
           console.log(`[agent-fallback] ${failure}`);
+          // 시간이 다 됐으면 검색 답변을 다시 시도할 여유가 없다
+          if (!out.ok && out.timedOut) return { status: 504, payload: { message: failure, toolExecutions: traces } };
         }
         for (const tools of [[{ google_search: {} }, { url_context: {} }], [{ google_search: {} }], null]) {
           try {

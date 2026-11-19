@@ -113,13 +113,14 @@ JSON만 출력: {"level":"medium" 또는 "high","reason":"20자 이내 한국어
 }
 
 // 키는 URL이 아니라 헤더로 보낸다 (URL 쿼리는 서버·프록시 로그에 남는다).
-export function callGemini(apiKey: string, body: Record<string, unknown>) {
+export function callGemini(apiKey: string, body: Record<string, unknown>, signal?: AbortSignal) {
   return fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify(body),
+      signal,
     }
   );
 }

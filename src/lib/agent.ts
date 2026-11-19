@@ -77,10 +77,14 @@ export type AgentOutput =
       files?: GeneratedFile[];
       official?: OfficialRecord[];
     }
-  | { ok: false; error: string; traces: ToolExecution[] };
+  | { ok: false; error: string; traces: ToolExecution[]; timedOut?: boolean };
 
 // 계획 세우기와 대안 찾기 차례까지 넉넉히
 const MAX_TURNS = 9;
+// Vercel 함수는 300초에 끊긴다. 에이전트는 시작 후 260초 안에 끝내고, 남은 시간은 앞뒤 처리에 쓴다.
+const AGENT_BUDGET_MS = 260_000;
+// 이보다 적게 남으면 도구를 멈추고 최종 답을 쓴다 (도구 한 차례 + 깊은 추론 답변이 들어갈 시간)
+const FINAL_RESERVE_MS = 100_000;
 
 const PLAN_TOOLS = [
   "google_search",
@@ -147,7 +151,19 @@ const DECLARATIONS = [
               min: { type: "number" },
               max: { type: "number" },
               label: { type: "string", description: "공고의 조건 요약 (25자 이내)" },
-              household: { type: "boolean", description: "본인이 아니라 가구 전체 소득을 보는 조건이면 true" },
+              household: {
+                type: "boolean",
+                description: "원가구(부모)나 배우자 포함 가구처럼 가구 전체 소득을 보는 조건이면 true. false면 본인 소득을 1인 가구 기준으로 계산한다",
+              },
+              deductPercent: {
+                type: "number",
+                description: "income·medianRatio 조건에서 공고가 근로·사업소득을 공제해 소득을 계산하면 그 공제율(%). 예: 소득평가액 30. 공고·검색에서 확인한 경우만 넣는다",
+              },
+              group: {
+                type: "string",
+                description:
+                  "특례·예외처럼 '또는'으로 갈리는 자격 경로 이름(예: '원가구 기준', '독립 특례', '30세 이상 특례'). 같은 경로의 요건은 같은 이름으로 묶고, 그 경로의 요건(본인 소득 하한, 따로 산 기간 등)을 하나도 빠뜨리지 않는다. 모든 경로에 공통인 요건은 비운다.",
+              },
             },
             required: ["field", "label"],
           },
@@ -373,7 +389,8 @@ const AGENT_RULES = `
 - 자격은 정책마다 다릅니다. 어떤 정책인지 모르면 묻거나 search_policies로 후보를 찾고, 고정된 일반 기준으로 판정하지 마세요. 숫자 조건을 모두 충족해도 나머지 조건이 남으면 "확인이 더 필요"라고 답하세요.
 - 판정에 꼭 필요한 정보가 [사용자 정보]와 대화에 없으면 추측하지 말고 ask_user로 한 가지만 물으세요.
 - 사용자가 말한 사정(주택 보유, 재산, 혼인, 나이 등)이 공고의 자격 조건과 관련되면 그 조건부터 conditions에 넣어 판정하세요. 이미 미충족 조건이 있으면 다른 정보를 묻지 말고 안 되는 이유와 대안으로 답하세요.
-- 공고 원문이나 검색 결과에 없는 공제·환산·예외 규칙(예: 근로소득 공제율)을 만들어 계산하지 마세요. 확인한 산정 방식이 없으면 사용자가 말한 금액을 그대로 쓰고, 실제 산정 방식은 접수 기관에서 확인하라고 caution에 쓰세요.
+- 소득을 공제해 계산하는 공고(예: 소득평가액 = 근로·사업소득 30% 공제)라면 직접 계산하지 말고 check_eligibility 소득 조건에 deductPercent로 넣으세요. 공고·검색에서 확인하지 않은 공제·환산·예외 규칙은 만들지 마세요.
+- 특례·예외가 있는 정책은 일반 경로와 특례 경로를 check_eligibility의 group으로 나눠 넣으세요. 판정은 서버가 경로 규칙으로 계산하니 그 결과를 그대로 쓰세요.
 - 사용자가 사업 이름을 말하면 그 사업의 기준으로 판정하세요. 이름이 비슷한 다른 사업(예: 국토교통부 청년월세 지원과 서울시 청년월세지원)의 기준을 섞지 말고, 지자체 사업은 따로 밝혀 대안이나 추가 안내로 넣으세요.
 - 도구 결과에 "추가로필요한정보"가 있으면 최종 답을 내지 말고 바로 ask_user로 그 정보를 물으세요. "확인 필요"를 신청 단계나 주의 문구로 미루지 마세요.
 - 사용자 정보의 값이 0이면 0으로 계산하세요. 값이 아예 없을 때만 묻습니다.
@@ -475,16 +492,18 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
   const addTrace = (t: Omit<ToolExecution, "step">) => traces.push({ step: traces.length + 1, ...t });
 
   const contents: unknown[] = [...input.request.contents];
+  const deadline = Date.now() + AGENT_BUDGET_MS;
+  const remain = () => deadline - Date.now();
+  let timeNote = "";
+  // 도구 선언은 늘 같이 보낸다 (지난 도구 호출 기록과 맞아야 한다). 답만 받을 차례에는 함수 호출을 끈다
   const body = (withTools: boolean) => ({
     systemInstruction: {
-      parts: [...input.request.systemInstruction.parts, { text: AGENT_RULES }],
+      parts: [...input.request.systemInstruction.parts, { text: AGENT_RULES + timeNote }],
     },
     contents,
-    ...(withTools && {
-      tools: [{ functionDeclarations: DECLARATIONS }, { google_search: {} }],
-      // 내장 검색과 함수 호출을 한 요청에 같이 쓰려면 필요한 설정
-      toolConfig: { includeServerSideToolInvocations: true },
-    }),
+    tools: [{ functionDeclarations: DECLARATIONS }, { google_search: {} }],
+    // 내장 검색과 함수 호출을 한 요청에 같이 쓰려면 includeServerSideToolInvocations가 필요하다
+    toolConfig: { includeServerSideToolInvocations: true, ...(!withTools && { functionCallingConfig: { mode: "NONE" } }) },
     // Gemini 3 계열은 temperature를 낮추면 도구 호출이 반복될 수 있어 기본값을 둔다
     generationConfig: { thinkingConfig: { thinkingLevel: level, includeThoughts: true } },
   });
@@ -492,10 +511,27 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
   show("AI가 목표를 보고 실행 계획을 세우고 있습니다...");
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    // 마지막 차례에는 도구 없이 답만 받는다
-    const res = await callGemini(key, body(turn < MAX_TURNS - 1));
-    if (!res.ok) return { ok: false, error: await geminiError(res), traces };
-    const json = await res.json();
+    // 시간이 얼마 안 남았으면 도구 없이 지금까지 결과로 답한다
+    const outOfTime = remain() < FINAL_RESERVE_MS;
+    if (outOfTime && !timeNote) {
+      timeNote =
+        "\n\n[시간 제한] 더 이상 도구를 쓰지 말고 지금까지 확인한 결과로 최종 답을 JSON 형식으로 주세요. 확인하지 못한 부분은 caution에 밝히세요.";
+      show("시간 안에 끝내기 위해 지금까지 확인한 내용으로 답을 정리하고 있습니다.");
+    }
+    // 마지막 차례에는 도구 없이 답만 받는다. 남은 시간을 넘기면 호출을 끊는다 (응답 본문 읽기까지 포함)
+    const timeout = { ok: false as const, error: "시간 제한 안에 답을 만들지 못했습니다. 질문을 조금 나눠서 다시 물어봐 주세요.", traces, timedOut: true };
+    if (remain() <= 0) return timeout;
+    let json: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    try {
+      const res = await callGemini(key, body(turn < MAX_TURNS - 1 && !outOfTime), AbortSignal.timeout(remain()));
+      if (!res.ok) return { ok: false, error: await geminiError(res), traces };
+      json = await res.json();
+    } catch (e) {
+      // 시간 초과로 끊긴 것만 시간 초과로 본다. 네트워크 오류는 검색 답변으로 다시 시도할 수 있게 둔다
+      const name = (e as Error)?.name;
+      if (name === "TimeoutError" || name === "AbortError") return timeout;
+      return { ok: false, error: "AI 서버와 연결이 끊겼습니다. 잠시 후 다시 시도해 주세요.", traces };
+    }
     recordUsage(json);
     const cand = json?.candidates?.[0];
     const parts: Record<string, any>[] = cand?.content?.parts || []; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -567,7 +603,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           status,
         });
 
-      if (fixes.length && !verifyRetried && turn < MAX_TURNS - 1) {
+      if (fixes.length && !verifyRetried && turn < MAX_TURNS - 1 && remain() > FINAL_RESERVE_MS) {
         // 고칠 점을 AI에게 돌려주고 같은 형식으로 다시 쓰게 한다 (한 번만)
         verifyRetried = true;
         verifyTrace(`답변 검증: 고칠 점 ${fixes.length}건 → 다시 작성`, "warn");
@@ -595,7 +631,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
       );
       // 출처: 공식 원문을 먼저 두고, 검색을 썼는데 출처가 없으면 답변 핵심을 다시 확인해 받는다
       const records = officialRecords();
-      if (usedSearch && !sources.length && answerCard) {
+      if (usedSearch && !sources.length && answerCard && remain() > 20_000) {
         show("답변의 근거 출처를 확인하고 있습니다.", "verify");
         const brief = [answerCard.summary, ...answerCard.facts.map((f) => `${f.label}: ${f.value}`)].join(" / ");
         sources.push(...(await groundSources(key, input.question || "", brief)));
@@ -825,9 +861,13 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
             max: number(c?.max),
             label: String(c?.label || "").slice(0, 40),
             household: c?.household === true,
+            deductPercent: number(c?.deductPercent),
+            group: c?.group ? String(c.group).slice(0, 20) : undefined,
           }))
           .filter((c: PolicyCondition) => FIELDS.includes(c.field) && c.label && (c.min !== undefined || c.max !== undefined))
-          .slice(0, 8);
+          .slice(0, 12);
+        // 경로(group)는 "또는"이라 2개 이상일 때만 뜻이 있다. 하나뿐이면 일반 경로를 빠뜨린 것이다
+        const groupNames = new Set(conditions.map((c) => c.group).filter(Boolean));
         const said = (args.values || {}) as Record<string, unknown>;
         const keys: (keyof MyValues)[] = ["age", "incomeManwon", "depositManwon", "rentManwon", "sepMonths", "householdIncomeManwon", "householdSize", "assetsManwon", "housesOwned"];
         const values: MyValues = { ...input.myValues };
@@ -837,6 +877,11 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         }
         if (!policyName) {
           response = { error: "정책 이름이 없습니다. 어떤 정책인지 확인하세요." };
+        } else if (groupNames.size === 1) {
+          response = {
+            error:
+              "group은 '또는'으로 갈리는 경로가 2개 이상일 때만 씁니다. 일반 경로(예: 원가구 기준)와 특례 경로를 각각 group으로 나눠 다시 호출하고, 경로가 하나뿐이면 group을 비우세요.",
+          };
         } else {
           await loadOfficial([policyName]);
           const judged = judgeConditions({
@@ -864,6 +909,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
               ...(judged.rejected.length && { 근거없어제외한조건: judged.rejected }),
               판정: verdictLabel,
               조건별: result.checks.map((c) => ({ 조건: c.label, 내값: c.mine, 결과: statusLabel[c.status], 근거: c.basis })),
+              ...(result.checks.some((c) => c.group) && { 경로판정: "[경로] 표시 조건은 경로 중 하나만 모두 충족하면 됩니다. 판정은 이 규칙으로 계산한 결과입니다." }),
               직접확인할조건: result.others,
               기준: result.basis,
             };
@@ -984,7 +1030,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         // 이미 미충족 조건이 있으면 어떤 답을 받아도 결론이 같으므로 묻지 않는다
         response = {
           asked: false,
-          note: `${summary.policyName}은 이미 미충족 조건이 있어 더 묻지 않습니다. 안 되는 이유를 밝히고 find_alternatives로 대안을 찾아 최종 답을 내세요.`,
+          note: `${summary.policyName}에는 이미 미충족 조건이 있어 더 묻지 않습니다. 안 되는 이유를 밝히고 find_alternatives로 대안을 찾아 최종 답을 내세요. 다른 정책에 필요한 정보라면 그 정책을 먼저 check_eligibility로 판정하세요.`,
         };
       } else if (name === "ask_user") {
         const ask: AgentAsk = {

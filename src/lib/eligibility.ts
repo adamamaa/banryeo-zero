@@ -12,6 +12,10 @@ export interface PolicyCondition {
   label: string;
   // 본인이 아니라 가구 전체 소득을 보는 조건
   household?: boolean;
+  // 공고가 근로·사업소득을 일부 공제해 소득을 계산하면 그 공제율(%) (예: 소득평가액 30%)
+  deductPercent?: number;
+  // 특례처럼 "또는"으로 갈리는 경로 이름. 같은 이름끼리는 모두 충족해야 하고, 경로 중 하나만 충족하면 된다
+  group?: string;
 }
 
 export interface MyValues {
@@ -32,6 +36,7 @@ export interface EligibilityCheck {
   mine: string;
   status: "pass" | "fail" | "unknown";
   basis: string;
+  group?: string;
 }
 
 export interface EligibilitySummary {
@@ -107,33 +112,59 @@ export function judgeConditions(input: {
   const official = pickOfficial(records)[0];
   const checks: EligibilityCheck[] = [];
   const rejected: string[] = [];
-  const missing: string[] = [];
+  // 조건마다 모르는 값이 있으면 물어볼 항목 (경로별로 거를 수 있게 따로 둔다)
+  const asks: { group?: string; what: string }[] = [];
+  const rejectedGroups = new Set<string>();
   const percents: number[] = [];
 
   for (const c of conditions) {
     const fromOfficial = Boolean(official && inOfficial(c, official));
     if (!fromOfficial && !otherEvidence) {
       rejected.push(c.label);
+      // 근거 없는 조건이 빠진 경로는 충족으로 볼 수 없다
+      if (c.group) rejectedGroups.add(c.group);
       continue;
     }
     let mine: number | undefined;
     let shown = "";
+    // 가구원 수를 몰라도 어떤 가구원 수든 결론이 같으면 바로 판정한다
+    let anySize: EligibilityCheck["status"] | undefined;
     if (c.field === "age") {
       mine = v.age;
       shown = mine === undefined ? "" : `만 ${mine}세`;
-    } else if (c.field === "income") {
-      mine = c.household ? v.householdIncomeManwon : v.incomeManwon;
-      shown = mine === undefined ? "" : `월 ${man(mine)}`;
-    } else if (c.field === "medianRatio") {
-      const income = c.household ? v.householdIncomeManwon : v.incomeManwon;
-      const size = c.household ? v.householdSize : v.householdSize ?? 1;
-      if (income !== undefined && size !== undefined) {
-        const ratio = medianRatioPercent(income * 10000, size);
-        mine = ratio;
-        percents.push(ratio);
-        shown = `${size}인 가구 기준 ${ratio}%`;
+    } else if (c.field === "income" || c.field === "medianRatio") {
+      const gross = c.household ? v.householdIncomeManwon : v.incomeManwon;
+      const deduct = Math.min(Math.max(c.deductPercent || 0, 0), 50);
+      const income = gross === undefined ? undefined : Math.round(gross * (100 - deduct)) / 100;
+      // 공제를 적용했으면 원래 금액과 공제 후 금액을 함께 보여 준다
+      const amount = gross === undefined ? "" : deduct ? `월 ${man(gross)} → ${deduct}% 공제 후 ${man(income!)}` : `월 ${man(gross)}`;
+      if (c.field === "income") {
+        mine = income;
+        shown = amount;
+      } else {
+        // 본인 소득 조건은 1인 가구 기준, 가구 소득 조건은 알려 준 가구원 수 기준
+        const size = c.household ? v.householdSize : 1;
+        if (income !== undefined && size !== undefined) {
+          const ratio = medianRatioPercent(income * 10000, size);
+          mine = ratio;
+          percents.push(ratio);
+          if (deduct) percents.push(medianRatioPercent(gross! * 10000, size));
+          shown = `${amount}, ${size}인 가구 기준 ${ratio}%`;
+        } else if (income !== undefined) {
+          // 가구원 수가 많을수록 비율이 낮아진다: 가장 큰 가구(6인)로도 넘으면 미충족, 1인으로도 안 넘으면 충족
+          const low = medianRatioPercent(income * 10000, 6);
+          const high = medianRatioPercent(income * 10000, 1);
+          if ((c.max !== undefined && low > c.max) || (c.min !== undefined && high < c.min)) {
+            anySize = "fail";
+            shown = `${amount}, 가구원 수와 관계없이 미충족 (${low}~${high}%)`;
+          } else if ((c.max === undefined || high <= c.max) && (c.min === undefined || low >= c.min)) {
+            anySize = "pass";
+            shown = `${amount}, 가구원 수와 관계없이 충족 (${low}~${high}%)`;
+          }
+          if (anySize) percents.push(low, high);
+        }
+        percents.push(...[c.min, c.max].filter((x): x is number => x !== undefined));
       }
-      percents.push(...[c.min, c.max].filter((x): x is number => x !== undefined));
     } else if (c.field === "sepMonths") {
       mine = v.sepMonths;
       shown = mine === undefined ? "" : `${mine}개월`;
@@ -145,29 +176,61 @@ export function judgeConditions(input: {
       shown = mine === undefined ? "" : man(mine);
     }
     const status: EligibilityCheck["status"] =
-      mine === undefined
+      anySize ??
+      (mine === undefined
         ? "unknown"
         : (c.min === undefined || mine >= c.min) && (c.max === undefined || mine <= c.max)
         ? "pass"
-        : "fail";
-    if (status === "unknown") {
-      missing.push(c.household ? "가구 월 소득과 가구원 수" : MISSING[c.field]);
+        : "fail");
+    // 재산·주택은 사용자가 말했을 때만 판정하고, 모르면 되묻지 않고 직접 확인할 조건으로 남긴다
+    if (status === "unknown" && c.field !== "assets" && c.field !== "houses") {
+      const income = c.household ? v.householdIncomeManwon : v.incomeManwon;
+      const what = !c.household
+        ? MISSING[c.field]
+        : c.field === "income"
+        ? "가구 월 소득"
+        : income === undefined
+        ? "가구 월 소득과 가구원 수"
+        : "가구원 수";
+      asks.push({ group: c.group, what });
     }
     checks.push({
-      label: c.label,
+      label: c.group ? `[${c.group}] ${c.label}` : c.label,
       mine: shown || "정보 없음",
       status,
       basis: fromOfficial ? `${official!.source} 원문` : otherEvidenceLabel,
+      group: c.group,
     });
   }
 
-  if (!checks.length && !others.length) return { rejected, missing, summary: undefined };
-  const failed = checks.some((c) => c.status === "fail");
+  if (!checks.length && !others.length) return { rejected, missing: [], summary: undefined };
+  // 그룹이 없는 조건은 모두 충족해야 하고, 그룹(경로)이 있으면 그중 하나만 모두 충족하면 된다
+  const common = checks.filter((c) => !c.group);
+  const groups = Array.from(new Set([...checks.filter((c) => c.group).map((c) => c.group as string), ...Array.from(rejectedGroups)]));
+  const groupStatus = (g: string) => {
+    const list = checks.filter((c) => c.group === g);
+    if (list.some((c) => c.status === "fail")) return "fail";
+    return !rejectedGroups.has(g) && list.every((c) => c.status === "pass") ? "pass" : "unknown";
+  };
+  const statuses = groups.map(groupStatus);
+  const failed =
+    common.some((c) => c.status === "fail") || (groups.length > 0 && statuses.every((s) => s === "fail"));
+  const pathPassed = groups.length === 0 || statuses.includes("pass");
   const verdict: EligibilitySummary["verdict"] = failed
     ? "ineligible"
-    : checks.length && checks.every((c) => c.status === "pass") && !others.length
+    : common.every((c) => c.status === "pass") && pathPassed && !others.length
     ? "eligible"
     : "needs_check";
+  // 물어볼 것: 공통 조건 + (통과한 경로가 없을 때) 아직 미충족이 아닌 경로의 조건
+  const missing = failed
+    ? []
+    : Array.from(
+        new Set(
+          asks
+            .filter((a) => !a.group || (!pathPassed && groupStatus(a.group) !== "fail"))
+            .map((a) => a.what)
+        )
+      );
   const summary: EligibilitySummary = {
     policyName,
     verdict,
@@ -176,6 +239,6 @@ export function judgeConditions(input: {
     basis: official ? `${official.source} ${official.updated} 수정 원문 기준` : `${otherEvidenceLabel}에서 확인한 조건 기준`,
     percents,
   };
-  // 이미 미충족 조건이 있으면 더 물을 필요가 없다 (어떤 답이 와도 결론이 같다)
-  return { rejected, missing: failed ? [] : Array.from(new Set(missing)), summary };
+  // 이미 미충족이면 더 물을 필요가 없다 (어떤 답이 와도 결론이 같다)
+  return { rejected, missing, summary };
 }

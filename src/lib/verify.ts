@@ -97,18 +97,20 @@ export function verifyAnswer(
     );
 
     // 3. 판정: 대조 결과와 반대로 말하지 않는지
-    const positive = /(신청\s*대상(에|입니다|이에요|이 됩니다)|받을\s*수\s*있(어요|습니다)|자격(을|이)\s*충족|요건(은|이|을)?\s*(맞(?!지)|충족(?!하지|되지))|맞을\s*수\s*있)/.test(text);
+    // "충족하지 못", "맞지 않"처럼 부정이 이어지는 말은 긍정으로 세지 않는다
+    const positive =
+      /(신청\s*대상(에(?!서)|입니다|이에요|이 됩니다)|받을\s*수\s*있(어요|습니다)|(자격|요건)(은|이|을|도)?\s*(모두\s*)?(충족(?!(하지|되지)\s*(않|못)|\s*(못|안))|맞(?!지\s*(않|못)))|맞을\s*수\s*있)/.test(text);
     const negative = /(대상이\s*아니|요건을\s*충족하지\s*못|받을\s*수\s*없|부적격)/.test(text);
+    // 미충족 판정에서는 "어렵다", "초과" 같은 말로 안 된다고 밝혔으면 맞게 안내한 것으로 본다
+    const negativeAny =
+      negative ||
+      /(대상에서\s*제외|아닙니다|(충족|해당)(하지|되지)\s*(않|못)|충족\s*못|맞지\s*(않|못)|신청(할|이)?\s*수\s*없|어렵|불가|미충족|초과)/.test(text);
     const mentionsCheck = /확인|추가|남아|필요/.test(text);
     let verdictIssue = "";
-    if (s.verdict === "ineligible" && positive && !negative) verdictIssue = "대조 결과는 '미충족 조건 있음'인데 신청 대상이라고 안내했습니다.";
+    if (s.verdict === "ineligible" && positive && !negativeAny) verdictIssue = "대조 결과는 '미충족 조건 있음'인데 신청 대상이라고 안내했습니다.";
     else if (s.verdict === "eligible" && negative && !positive) verdictIssue = "대조 결과는 '확인한 조건 충족'인데 대상이 아니라고 안내했습니다.";
     else if (s.verdict === "needs_check" && positive && !mentionsCheck)
       verdictIssue = "확인이 남은 조건이 있는데 확정적으로 대상이라고 안내했습니다. 남은 조건을 밝히세요.";
-    // 공고에서 확인하지 않은 공제를 적용해 소득을 낮춰 계산하면 판정이 뒤집힌다
-    const deduction = text.match(/\d+\s*%\s*(근로소득\s*)?공제/);
-    if (!verdictIssue && deduction)
-      verdictIssue = `'${deduction[0]}' 계산은 확인한 공고 기준에 없습니다. 자격 확인 결과의 금액과 판정으로 다시 쓰세요.`;
     const verdictLabel = { eligible: "확인한 조건 충족", needs_check: "확인이 더 필요", ineligible: "미충족 조건 있음" }[s.verdict];
     checks.push(
       verdictIssue
