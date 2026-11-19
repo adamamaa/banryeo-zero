@@ -1,6 +1,7 @@
 // 에이전트가 만든 파일(엑셀·CSV·워드·텍스트·캘린더).
 // 서버는 내용만 검사해 보내고, 실제 파일은 다운로드할 때 브라우저에서 만든다 (대화 기록에는 내용만 저장).
 // 외부 라이브러리 없이 Office 형식(XML을 묶은 ZIP)을 직접 쓴다.
+import { byDeadline } from "./deadline";
 import { buildIcs } from "./ics";
 import type { Gov24Notice } from "./gov24";
 
@@ -59,7 +60,8 @@ function noticeSheet(notices: Gov24Notice[]): FileSheet {
   return {
     name: "공고 목록",
     columns: ["공고명", "기관", "지원 내용", "신청 대상", "신청 기한", "신청처", "출처", "링크"],
-    rows: notices.map((n) =>
+    // 마감일이 확인된 공고부터 (마감 빠른 순)
+    rows: [...notices].sort((a, b) => byDeadline(a, b)).map((n) =>
       [n.name, n.org, n.summary, n.target, deadlineOf(n), n.applyAt, SOURCE_NAME[n.source || "gov24"], n.url].map((c) =>
         clean(c, LIMIT.cell)
       )
