@@ -7,7 +7,7 @@ export interface OfficialRecord {
   query: string;
   // 이름이 정확히 같은 기록인지 (비슷한 이름의 지역 사업과 구분)
   exact: boolean;
-  source: "보조금24" | "온통청년";
+  source: "보조금24" | "온통청년" | "복지로";
   name: string;
   org: string;
   updated: string; // YYYY-MM-DD

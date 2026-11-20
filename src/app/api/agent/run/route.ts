@@ -275,8 +275,8 @@ export async function POST(req: NextRequest) {
               () => ({ ok: false, n: [] as Gov24Notice[] })
             )
           : Promise.resolve({ ok: false, n: [] as Gov24Notice[] }),
-        // 복지로 지자체 복지서비스 (같은 공공데이터포털 키, 시도가 있을 때만 조회)
-        pk && sido
+        // 복지로 지자체 복지서비스(시도가 있을 때) + 중앙부처 복지서비스(항상). 같은 공공데이터포털 키
+        pk
           ? recommendWelfare(
               pk,
               {
@@ -299,7 +299,7 @@ export async function POST(req: NextRequest) {
       if (!gov.ok && !youth.ok && !welfare.ok)
         return NextResponse.json({ connected: false, reason: "error", notices: [], sources: [] });
 
-      // 순서: 마감일이 확인된 공고 → 온통청년(조건 코드로 거름) → 복지로 지자체(내 시군구) → 보조금24. 이름이 겹치면 하나만 둔다
+      // 순서: 마감일이 확인된 공고 → 온통청년(조건 코드로 거름) → 복지로(내 시군구·중앙부처) → 보조금24. 이름이 겹치면 하나만 둔다
       const norm = (name: string) => name.replace(/[\s()·\-[\]]/g, "").replace(/^20\d{2}(년)?/, "");
       const notices: Gov24Notice[] = [];
       const add = (list: Gov24Notice[], max: number) => {

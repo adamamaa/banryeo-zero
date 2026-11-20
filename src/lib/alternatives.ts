@@ -4,7 +4,7 @@
 import { isOtherSidoOrg } from "@/data/regions";
 import { officialGov24, recommendGov24, searchGov24, type Gov24Notice } from "./gov24";
 import { officialYouth, recommendYouth, searchYouth, type YouthQuery } from "./youthcenter";
-import { recommendWelfare, searchWelfare } from "./welfare";
+import { officialWelfare, recommendWelfare, searchWelfare } from "./welfare";
 import { normName, similarName, type OfficialRecord } from "./officialFacts";
 import { isNegativeAnswer, type AnswerAlternative, type AnswerCard } from "./card";
 
@@ -48,14 +48,21 @@ export async function lookupOfficial(
   const results = await Promise.allSettled([
     keys.pk ? officialGov24(keys.pk, name) : Promise.resolve([]),
     keys.yk ? officialYouth(keys.yk, name) : Promise.resolve([]),
+    // 복지로 중앙부처 복지서비스 상세 (지원 대상·선정 기준·지원 내용)
+    keys.pk ? officialWelfare(keys.pk, name) : Promise.resolve([]),
   ]);
   const q = normName(name);
-  return results
+  const order = (a: OfficialRecord, b: OfficialRecord) => Number(b.exact) - Number(a.exact) || b.updated.localeCompare(a.updated);
+  const sorted = results
     .flatMap((r) => (r.status === "fulfilled" ? r.value : []))
     .filter((r) => similarName(r.name, name) && !isOtherSidoOrg(r.org, sido))
     .map((r) => ({ ...r, query: name, exact: normName(r.name) === q }))
-    .sort((a, b) => Number(b.exact) - Number(a.exact) || b.updated.localeCompare(a.updated))
-    .slice(0, 3);
+    .sort(order);
+  // 같은 출처의 비슷한 기록이 세 자리를 다 차지하지 않게, 출처마다 가장 맞는 기록을 먼저 하나씩 고른다
+  const picked: OfficialRecord[] = [];
+  for (const r of sorted) if (!picked.some((p) => p.source === r.source)) picked.push(r);
+  for (const r of sorted) if (picked.length < 3 && !picked.includes(r)) picked.push(r);
+  return picked.slice(0, 3).sort(order);
 }
 
 // 공고 찾기: 검색어가 있으면 검색, 없으면 내 조건에 맞는 추천 공고를 가져온다

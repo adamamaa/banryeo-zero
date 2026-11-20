@@ -1,13 +1,20 @@
-// 한국사회보장정보원 지자체복지서비스 (복지로) 실시간 조회. 응답은 XML.
-// 요청: https://apis.data.go.kr/B554287/LocalGovernmentWelfareInformations/LcgvWelfarelist
+// 한국사회보장정보원 복지로 실시간 조회: 지자체복지서비스 + 중앙부처복지서비스. 응답은 XML.
+// 지자체: https://apis.data.go.kr/B554287/LocalGovernmentWelfareInformations/LcgvWelfarelist
 //   serviceKey, pageNo, numOfRows, lifeArray(생애주기, 004=청년), ctpvNm(시도 정식 명칭), sggNm(시군구)
 // 2026-11-18 실제 호출로 확인: servList 안에 servId·servNm·servDgst·ctpvNm·sggNm·bizChrDeptNm·aplyMtdNm·
 //   lifeNmArray·trgterIndvdlNmArray·intrsThemaNmArray·sprtCycNm·srvPvsnNm·servDtlLink.
+// 중앙부처: https://apis.data.go.kr/B554287/NationalWelfareInformationsV001/NationalWelfarelistV001 (callTp=L)
+// 2026-11-20 실제 호출로 확인: servList 안에 servId·servNm·servDgst·jurMnofNm·jurOrgNm·lifeArray·trgterIndvdlArray·
+//   intrsThemaArray·onapPsbltYn·sprtCycNm·srvPvsnNm·servDtlLink (이름에 Nm이 없고 시도·시군구가 없다).
+//   상세 NationalWelfaredetailedV001 (callTp=D, servId) → tgtrDtlCn(지원 대상)·slctCritCn(선정 기준)·alwServCn(지원 내용)·
+//   wlfareInfoOutlCn(개요, 모집기간이 들어 있기도 함)·crtrYr(기준 연도).
 // 키는 공공데이터포털 일반 인증키(PUBLIC_DATA_API_KEY)를 같이 쓴다.
 import type { Gov24Notice } from "./gov24";
+import type { OfficialRecord } from "./officialFacts";
 import { relevanceScore } from "./relevance";
 
 const ENDPOINT = "https://apis.data.go.kr/B554287/LocalGovernmentWelfareInformations/LcgvWelfarelist";
+const CENTRAL = "https://apis.data.go.kr/B554287/NationalWelfareInformationsV001";
 
 // 시도 → 복지로 정식 명칭 (광주·전남은 통합 명칭도 시도)
 const CTPV: Record<string, string[]> = {
@@ -41,7 +48,14 @@ const GROUP_ONLY: [RegExp, string[]][] = [
 type Item = Record<string, string>;
 
 const decode = (v: string) =>
-  v.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+  v
+    .replace(/&#13;/g, "\n")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
 
 // 간단한 XML 파서: <servList>…</servList> 블록마다 <태그>값</태그>를 꺼낸다
 export function parseServList(xml: string): Item[] {
@@ -67,6 +81,71 @@ async function fetchList(key: string, params: Record<string, string>): Promise<I
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function getXml(url: URL, what: string): Promise<string> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 20_000);
+  try {
+    const res = await fetch(url, { cache: "no-store", signal: ac.signal });
+    if (!res.ok) throw new Error(`${what} 응답 ${res.status}`);
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 중앙부처 복지서비스 목록. 지자체 응답과 같은 필드 이름으로 맞춰 아래 거르기·점수 규칙을 그대로 쓴다.
+async function fetchCentral(key: string, params: Record<string, string>, youthOnly = true): Promise<Item[]> {
+  const url = new URL(`${CENTRAL}/NationalWelfarelistV001`);
+  url.searchParams.set("serviceKey", key);
+  url.searchParams.set("callTp", "L");
+  url.searchParams.set("pageNo", "1");
+  if (youthOnly) url.searchParams.set("lifeArray", "004"); // 청년
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  return parseServList(await getXml(url, "복지로 중앙부처")).map((x) => ({
+    ...x,
+    lifeNmArray: x.lifeArray || "",
+    trgterIndvdlNmArray: x.trgterIndvdlArray || "",
+    intrsThemaNmArray: x.intrsThemaArray || "",
+    bizChrDeptNm: [x.jurMnofNm, x.jurOrgNm].filter(Boolean).join(" "),
+    aplyMtdNm: x.onapPsbltYn === "Y" ? "복지로 온라인 신청 가능" : "",
+  }));
+}
+
+const tagOf = (xml: string, name: string) => decode(xml.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))?.[1] || "");
+
+// 공식 원문 확인: 정책 이름으로 중앙부처 복지서비스를 찾아 상세(지원 대상·선정 기준·지원 내용)를 가져온다
+export async function officialWelfare(key: string, name: string): Promise<Omit<OfficialRecord, "query" | "exact">[]> {
+  const items = (await fetchCentral(key, { numOfRows: "5", searchWrd: name, srchKeyCode: "001" }, false)).slice(0, 2);
+  const details = await Promise.allSettled(
+    items.map((x) => {
+      const url = new URL(`${CENTRAL}/NationalWelfaredetailedV001`);
+      url.searchParams.set("serviceKey", key);
+      url.searchParams.set("callTp", "D");
+      url.searchParams.set("servId", x.servId);
+      return getXml(url, "복지로 중앙부처 상세");
+    })
+  );
+  return items.flatMap((x, i) => {
+    const d = details[i];
+    if (d.status !== "fulfilled") return [];
+    const xml = d.value;
+    const year = tagOf(xml, "crtrYr");
+    const outline = tagOf(xml, "wlfareInfoOutlCn") || x.servDgst || "";
+    return [
+      {
+        source: "복지로" as const,
+        name: (tagOf(xml, "servNm") || x.servNm).slice(0, 60),
+        org: (tagOf(xml, "jurMnofNm") || x.bizChrDeptNm).slice(0, 40),
+        updated: /^20\d{2}$/.test(year) ? `${year}-01-01` : "",
+        benefit: tagOf(xml, "alwServCn").slice(0, 700),
+        target: [tagOf(xml, "tgtrDtlCn").slice(0, 500), tagOf(xml, "slctCritCn").slice(0, 300)].filter(Boolean).join(" "),
+        deadline: (outline.match(/모집기간[^)\n]*/)?.[0] || "").slice(0, 80),
+        url: /^https:\/\//.test(x.servDtlLink || "") ? x.servDtlLink : "https://www.bokjiro.go.kr",
+      },
+    ];
+  });
 }
 
 export interface WelfareQuery {
@@ -107,15 +186,16 @@ const toNotice = (x: Item): Gov24Notice => ({
   topics: (x.intrsThemaNmArray || "").replace(/서민금융/g, "").slice(0, 60),
 });
 
-// 대안 찾기: 서비스명·내용을 키워드로 검색한다 (시도 공통 사업과 내 시군구 사업만)
+// 대안 찾기: 서비스명·내용을 키워드로 검색한다 (시도 공통 사업, 내 시군구 사업, 중앙부처 사업)
 export async function searchWelfare(key: string, q: WelfareQuery, keywords: string[], limit = 6): Promise<Gov24Notice[]> {
   const ctpvs = q.sido ? CTPV[q.sido] : undefined;
-  if (!ctpvs) return [];
-  const results = await Promise.allSettled(
-    ctpvs.flatMap((ctpvNm) =>
+  const results = await Promise.allSettled([
+    ...(ctpvs || []).flatMap((ctpvNm) =>
       keywords.map((searchWrd) => fetchList(key, { numOfRows: "20", ctpvNm, searchWrd, srchKeyCode: "003" }))
-    )
-  );
+    ),
+    ...keywords.map((searchWrd) => fetchCentral(key, { numOfRows: "20", searchWrd, srchKeyCode: "003" })),
+  ]);
+  if (!results.length) return [];
   if (results.every((r) => r.status === "rejected")) throw new Error("복지로 검색 실패");
   const seen = new Set<string>();
   return results
@@ -136,14 +216,18 @@ export async function recommendWelfare(
   opts?: { bypassCache?: boolean }
 ): Promise<Gov24Notice[]> {
   const ctpvs = q.sido ? CTPV[q.sido] : undefined;
-  if (!ctpvs) return [];
   const cacheKey = JSON.stringify(q);
   const hit = !opts?.bypassCache ? cache.get(cacheKey) : undefined;
   if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.data;
 
+  // 중앙부처 사업은 사는 곳과 관계없이 함께 가져온다 (지자체 조회와 동시에)
+  const centralP = fetchCentral(key, { numOfRows: "50" }).then(
+    (v) => ({ ok: true, v }),
+    () => ({ ok: false, v: [] as Item[] })
+  );
   let items: Item[] = [];
   let anyOk = false;
-  for (const ctpvNm of ctpvs) {
+  for (const ctpvNm of ctpvs || []) {
     const [localRes, sidoRes] = await Promise.allSettled([
       q.sigungu ? fetchList(key, { numOfRows: "30", ctpvNm, sggNm: q.sigungu }) : Promise.resolve([] as Item[]),
       fetchList(key, { numOfRows: "50", ctpvNm }),
@@ -158,7 +242,10 @@ export async function recommendWelfare(
     items = [...local, ...sido.filter((x) => !x.sggNm || x.sggNm === q.sigungu)];
     if (items.length) break;
   }
+  const central = await centralP;
+  if (central.ok) anyOk = true;
   if (!anyOk) throw new Error("복지로 조회 실패");
+  items = [...items, ...central.v];
 
   const seen = new Set<string>();
   const data = items

@@ -763,7 +763,8 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
             이름: r.name,
             기관: r.org,
             출처: r.source,
-            최근수정: r.updated,
+            // 복지로 중앙부처 기록은 수정일이 없고 기준 연도만 있다
+            ...(r.source === "복지로" ? { 기준연도: r.updated.slice(0, 4) } : { 최근수정: r.updated }),
             이름일치: r.exact,
             지원내용: r.benefit,
             대상: r.target.slice(0, 200),
@@ -776,11 +777,18 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         addTrace({
           toolName: "check_policy",
           title: `공식 원문 확인: ${found.length}건`,
-          basis: "보조금24 · 온통청년",
+          basis: "보조금24 · 온통청년 · 복지로",
           source: "live",
           input: { 정책: names.join(", ") || "-" },
           output: found.length
-            ? Object.fromEntries(found.map((r, i) => [`${i + 1}`, `${r.name} (${r.source}, ${r.updated} 수정)`]))
+            ? Object.fromEntries(
+                found.map((r, i) => [
+                  `${i + 1}`,
+                  r.source === "복지로"
+                    ? `${r.name} (복지로 중앙부처, ${r.updated.slice(0, 4) || "기준 연도 없음"}년 기준)`
+                    : `${r.name} (${r.source}, ${r.updated} 수정)`,
+                ])
+              )
             : { 결과: "공식 원문 없음" },
           status: found.length ? "done" : "warn",
         });
