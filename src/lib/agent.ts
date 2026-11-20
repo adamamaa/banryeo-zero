@@ -58,6 +58,8 @@ export interface AgentInput {
   myValues?: MyValues;
   // 파일 요청을 말로만 넘기지 않았는지 검증할 때 쓰는 원래 질문
   question?: string;
+  // 에이전트 전에 쓴 시간 (인스타그램 가져오기 등). 함수 300초 한도에서 뺀다
+  elapsedMs?: number;
 }
 
 export type AgentOutput =
@@ -497,7 +499,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
   const addTrace = (t: Omit<ToolExecution, "step">) => traces.push({ step: traces.length + 1, ...t });
 
   const contents: unknown[] = [...input.request.contents];
-  const deadline = Date.now() + AGENT_BUDGET_MS;
+  const deadline = Date.now() + AGENT_BUDGET_MS - Math.min(Math.max(input.elapsedMs || 0, 0), 80_000);
   const remain = () => deadline - Date.now();
   let timeNote = "";
   // 도구 선언은 늘 같이 보낸다 (지난 도구 호출 기록과 맞아야 한다). 답만 받을 차례에는 함수 호출을 끈다

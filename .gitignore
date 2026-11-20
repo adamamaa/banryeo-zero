@@ -1,4 +1,10 @@
 node_modules
 .next
 .env.local
+# API 키가 든 파일은 어떤 이름이든 올리지 않는다 (예: treg-test/.env). 예시 파일만 올린다.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.local.example
 *.tsbuildinfo

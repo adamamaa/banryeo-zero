@@ -1273,7 +1273,7 @@ export default function Page() {
             }
           }}
           aria-label="메시지 입력"
-          placeholder="청년 정책을 물어보거나 공고문·서류를 첨부하세요"
+          placeholder="청년 정책을 물어보거나, 인스타그램 링크를 붙이거나, 공고문·서류를 첨부하세요"
           // 기본 두 줄, 길어지면 최대 8줄까지 늘어난다 (field-sizing 미지원 브라우저는 두 줄 고정 + 스크롤)
           className="block min-h-[3rem] w-full resize-none border-0 bg-transparent px-0.5 text-[15px] leading-6 text-slate-700 outline-none placeholder:text-slate-400 focus:ring-0 [field-sizing:content] max-h-52"
         />
@@ -2222,7 +2222,9 @@ export default function Page() {
                   대화 기록, 내 정보, 도구 목록, API 키는 이 브라우저에만 저장되고 반려제로 서버에는 남지 않습니다.
                   질문하면 답변을 만들기 위해 질문, 이전 대화, 내 정보(지역·나이·소득 등 조건), 첨부 서류가 Google Gemini로
                   전송되고, 추천 공고를 찾을 때 지역이 공공 데이터 조회(복지로 등)에 쓰입니다. 이미지·PDF 서류는 원본이, 텍스트
-                  서류는 주민번호·연락처·계좌를 가린 뒤 전송됩니다. 체험할 때는 실제 정보 대신 예시 값과 가상 서류를 써 주세요.
+                  서류는 주민번호·연락처·계좌를 가린 뒤 전송됩니다. 인스타그램 링크를 넣으면 게시물의 캡션과 대본(텍스트)만
+                  Treg·ScrapeCreators API로 가져와 분석하며, 영상·이미지는 받지 않습니다. 체험할 때는 실제 정보 대신 예시 값과 가상
+                  서류를 써 주세요.
                 </p>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <button
