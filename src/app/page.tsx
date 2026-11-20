@@ -1277,15 +1277,31 @@ export default function Page() {
           // 기본 두 줄, 길어지면 최대 8줄까지 늘어난다 (field-sizing 미지원 브라우저는 두 줄 고정 + 스크롤)
           className="block min-h-[3rem] w-full resize-none border-0 bg-transparent px-0.5 text-[15px] leading-6 text-slate-700 outline-none placeholder:text-slate-400 focus:ring-0 [field-sizing:content] max-h-52"
         />
-        <div className="mt-1.5 flex items-center justify-between">
-          <label
-            aria-label="서류 첨부"
-            title="서류 첨부"
-            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-slate-200 text-slate-600 transition-colors hover:bg-slate-50"
-          >
-            <Paperclip className="h-4 w-4" />
-            <input type="file" multiple accept=".pdf,image/*,.txt" onChange={onFiles} className="sr-only" />
-          </label>
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <label
+              aria-label="서류 첨부"
+              title="서류 첨부 (첨부한 파일은 판독을 위해 Google Gemini로 전송됩니다)"
+              className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-slate-200 text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              <Paperclip className="h-4 w-4" />
+              <input type="file" multiple accept=".pdf,image/*,.txt" onChange={onFiles} className="sr-only" />
+            </label>
+            {/* 공개 사이트에서 실제 서류가 올라오지 않게: 첨부 버튼 바로 옆에 안내하고 가상 서류로 이어 준다 */}
+            <p className="min-w-0 truncate text-[11px] text-slate-400">
+              실제 서류는 올리지 마세요 ·{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setView("audit");
+                  setCanvasOpen(true);
+                }}
+                className="font-medium text-brand-700 underline-offset-2 hover:underline"
+              >
+                가상 서류 받기
+              </button>
+            </p>
+          </div>
           {working ? (
             <button
               type="button"
