@@ -20,6 +20,7 @@ http://localhost:3000 (Windows는 `실행하기.bat` 더블클릭)
 - `GEMINI_API_KEY`: 질문 답변, 자격 확인, 서류 판독
 - `PUBLIC_DATA_API_KEY`: 보조금24, 복지로
 - `YOUTHCENTER_API_KEY`: 온통청년
+- `TREG_API_KEY`: 인스타그램 게시물 캡션·대본 가져오기 (Treg 팀 토큰)
 
 ## 무엇이 동작하나
 
@@ -28,6 +29,7 @@ http://localhost:3000 (Windows는 `실행하기.bat` 더블클릭)
 - **금액 대조**: 답변의 정책 금액을 가장 최근 수정된 공식 원문과 비교한다.
 - **서류 검수**: 고른 공고 기준으로 첨부 서류를 AI가 판독한다. 공고를 고르지 않으면 서류 자체의 문제만 점검한다.
 - **파일 만들기**: 엑셀, CSV, 워드, 텍스트, 캘린더 파일을 만든다.
+- **인스타그램 링크 대조**: 릴스·게시물 링크를 넣으면 캡션과 대본(텍스트)만 가져와 공식 공고와 대조하고, 다른 점과 마감 여부를 알려 준다. 영상·이미지는 받지 않는다. 가져오지 못하면 캡션을 붙여 넣으라고 안내한다.
 
 `public/sample-docs`에는 업로드 테스트용 가상 서류가 들어 있다.
 
@@ -60,6 +62,7 @@ http://localhost:3000 (Windows는 `실행하기.bat` 더블클릭)
 | 오픈소스 | lucide-react | ISC |
 | 폰트 | Pretendard (길형진), Inter (Rasmus Andersson) | SIL OFL 1.1 |
 | 데이터 | 온통청년 청년정책 API, 공공데이터포털 대한민국 공공서비스(혜택) 정보, 지자체복지서비스 | 각 제공기관 이용 조건 |
+| 데이터 | ScrapeCreators 인스타그램 API (Treg 경유, 캡션·대본 텍스트만) | 각 서비스 이용 조건 |
 | AI | Google Gemini API (서비스), Claude·Claude Code·Google Antigravity·Google Stitch·Google Nano Banana·Google Neon (개발) | 각 서비스 약관 |
 | 로고 | 반려제로 로고·심볼: AI 생성 (Google Nano Banana, SVG 변환 Google Neon) | – |
 | 시연 자료 | `public/sample-docs`의 가상 서류·가상 공고문 | 팀 제작, 실제 인물 아님 |
