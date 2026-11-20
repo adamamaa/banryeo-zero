@@ -60,8 +60,8 @@ http://localhost:3000 (Windows는 `실행하기.bat` 더블클릭)
 | 오픈소스 | lucide-react | ISC |
 | 폰트 | Pretendard (길형진), Inter (Rasmus Andersson) | SIL OFL 1.1 |
 | 데이터 | 온통청년 청년정책 API, 공공데이터포털 대한민국 공공서비스(혜택) 정보, 지자체복지서비스 | 각 제공기관 이용 조건 |
-| AI | Google Gemini API (서비스), Claude·Claude Code·Google Antigravity·Google Stitch (개발) | 각 서비스 약관 |
-| 로고 | 반려제로 로고·심볼: AI 생성 (Google Nano Banana), SVG 변환 Neon | – |
+| AI | Google Gemini API (서비스), Claude·Claude Code·Google Antigravity·Google Stitch·Google Nano Banana·Google Neon (개발) | 각 서비스 약관 |
+| 로고 | 반려제로 로고·심볼: AI 생성 (Google Nano Banana, SVG 변환 Google Neon) | – |
 | 시연 자료 | `public/sample-docs`의 가상 서류·가상 공고문 | 팀 제작, 실제 인물 아님 |
 
 자세한 링크와 기준일은 [docs/04_별첨_활용한_외부자원_출처.md](docs/04_별첨_활용한_외부자원_출처.md)에 있다.
