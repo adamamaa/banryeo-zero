@@ -43,3 +43,22 @@ http://localhost:3000 (Windows는 `실행하기.bat` 더블클릭)
 
 - 사전 점검 결과일 뿐 최종 판정은 접수 기관이 한다.
 - 이미지·PDF 서류는 판독을 위해 원본이 Gemini로 전송된다. 텍스트 서류만 마스킹 후 전송된다.
+- 질문할 때 내 정보(지역·나이·소득 등 조건)가 Gemini로 전송된다. 이름·연락처는 받지 않고, 내 정보는 브라우저에만 저장한다.
+
+## 제출 문서
+
+해커톤 제출 문서 초안은 [`docs/`](docs/README.md)에 있다.
+
+## Credits / Licenses
+
+| 구분 | 이름 | 라이선스 |
+| :--- | :--- | :--- |
+| 오픈소스 | Next.js, React, React DOM, Tailwind CSS, PostCSS, Autoprefixer | MIT |
+| 오픈소스 | TypeScript | Apache-2.0 |
+| 오픈소스 | lucide-react | ISC |
+| 폰트 | Pretendard (길형진), Inter (Rasmus Andersson) | SIL OFL 1.1 |
+| 데이터 | 온통청년 청년정책 API, 공공데이터포털 대한민국 공공서비스(혜택) 정보, 지자체복지서비스 | 각 제공기관 이용 조건 |
+| AI | Google Gemini API (서비스), Claude Code (개발) | 각 서비스 약관 |
+| 시연 자료 | `public/sample-docs`의 가상 서류·가상 공고문 | 팀 제작, 실제 인물 아님 |
+
+자세한 링크와 기준일은 [docs/04_별첨_활용한_외부자원_출처.md](docs/04_별첨_활용한_외부자원_출처.md)에 있다.
