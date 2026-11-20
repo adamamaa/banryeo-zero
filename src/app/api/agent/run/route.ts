@@ -24,7 +24,7 @@ function instagramBlock(url: string, ig: InstagramPost | null, hasToken: boolean
     "[SNS 게시물]",
     `링크: ${url} (${ig.kind === "reel" ? "릴스" : "게시물"}${ig.postedAt ? `, 게시일 ${ig.postedAt}` : ""})`,
     `캡션:\n${maskPii(ig.caption).masked || "(없음)"}`,
-    `대본(음성을 글자로 바꾼 것):\n${maskPii(ig.transcript).masked || "(없음)"}`,
+    `대본(음성을 글자로 바꾼 것):\n${maskPii(ig.transcript).masked || `(${ig.transcriptNote || "없음"})`}`,
     ig.problems.length ? `가져오지 못한 부분: ${ig.problems.join(", ")}` : "",
   ]
     .filter(Boolean)
@@ -642,7 +642,7 @@ export async function POST(req: NextRequest) {
               ? {
                   ...(ig!.postedAt ? { 게시일: ig!.postedAt } : {}),
                   캡션: short(maskPii(ig!.caption).masked),
-                  대본: short(maskPii(ig!.transcript).masked),
+                  대본: ig!.transcript ? short(maskPii(ig!.transcript).masked) : ig!.transcriptNote || "없음",
                   ...(ig!.problems.length ? { 참고: ig!.problems.join(", ") } : {}),
                 }
               : { 결과: tregToken ? ig?.problems.join(", ") || "가져오기 실패" : "가져오기 키 미설정", 대신: "캡션을 복사해 붙여 넣으면 같은 방식으로 대조합니다" },

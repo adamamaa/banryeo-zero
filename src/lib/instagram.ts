@@ -14,6 +14,8 @@ export interface InstagramPost {
   kind: "reel" | "post";
   caption: string;
   transcript: string;
+  // 대본이 비어 있는 정상적인 이유 (말소리 없는 릴스, 영상이 없는 카드뉴스)
+  transcriptNote?: string;
   postedAt?: string; // YYYY-MM-DD
   // 가져오지 못한 부분 (화면과 AI에 그대로 알린다)
   problems: string[];
@@ -88,11 +90,17 @@ export async function fetchInstagramPost(url: string, token: string, signal?: Ab
     callTreg(POST_ID, url, token, 20_000, signal),
     callTreg(TRANSCRIPT_ID, url, token, 45_000, signal),
   ]);
-  const meta = post.status === "fulfilled" ? parseCaption(post.value) : { caption: "" };
+  const meta: { caption: string; postedAt?: string; isVideo?: boolean } =
+    post.status === "fulfilled" ? parseCaption(post.value) : { caption: "" };
   if (post.status === "rejected") problems.push(`캡션을 가져오지 못함 (${post.reason instanceof Error ? post.reason.message : "오류"})`);
   else if (!meta.caption) problems.push("캡션 없음");
+  const finalKind = meta.isVideo === false ? "post" : kind;
   const transcript = script.status === "fulfilled" ? parseTranscript(script.value) : "";
-  if (script.status === "rejected") problems.push(`대본을 가져오지 못함 (${script.reason instanceof Error ? script.reason.message : "오류"})`);
-  else if (!transcript && kind === "reel") problems.push("대본 없음 (말소리가 없거나 인식하지 못함)");
-  return { url, kind: meta.isVideo === false ? "post" : kind, caption: meta.caption, transcript, postedAt: meta.postedAt, problems };
+  // 업체 응답: 영상이 없는 게시물은 404("post does not have a video"), 말소리가 없는 릴스는 text: null
+  const noVideo = meta.isVideo === false || (script.status === "rejected" && /HTTP 404/.test(String(script.reason)));
+  let transcriptNote: string | undefined;
+  if (noVideo) transcriptNote = "영상이 없는 게시물이라 대본 없음";
+  else if (script.status === "rejected") problems.push(`대본을 가져오지 못함 (${script.reason instanceof Error ? script.reason.message : "오류"})`);
+  else if (!transcript) transcriptNote = "말소리가 없거나 인식되지 않아 대본 없음";
+  return { url, kind: noVideo ? "post" : finalKind, caption: meta.caption, transcript, transcriptNote, postedAt: meta.postedAt, problems };
 }

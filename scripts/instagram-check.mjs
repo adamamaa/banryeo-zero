@@ -35,6 +35,8 @@ assert.equal(parseTranscript({ success: true, transcripts: [{ id: "1", shortcode
 assert.equal(parseTranscript({ transcripts: [{ text: "첫째" }, { text: null }, { text: "둘째" }] }), "첫째\n둘째");
 assert.equal(parseTranscript({ success: true, transcripts: null }), "");
 assert.equal(parseTranscript({ transcript: "단일 문자열 형식" }), "단일 문자열 형식");
+// 2026-11-20 실제 응답: 말소리 없는 릴스는 text: null
+assert.equal(parseTranscript({ success: true, transcripts: [{ id: "4013986108659918584", shortcode: "De0ixlMBub4", text: null, transcript_with_timestamp: null }] }), "");
 console.log("instagram-check offline ok");
 
 // 4. 실제 호출 (키가 있을 때만)
@@ -61,6 +63,7 @@ if (!token) {
           postedAt: r.postedAt,
           caption: r.caption.slice(0, 120),
           transcript: r.transcript.slice(0, 200),
+          transcriptNote: r.transcriptNote,
           problems: r.problems,
           seconds: ((Date.now() - t0) / 1000).toFixed(1),
         },
