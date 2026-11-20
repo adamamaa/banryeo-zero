@@ -771,7 +771,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
             신청기한: r.deadline,
           })),
           note: found.length
-            ? "이름이 일치하는 기록 중 최근 수정된 원문을 기준으로 쓰세요."
+            ? "이름이 일치하는 기록 중 최근 수정된 원문을 기준으로 쓰세요. 같은 해의 다른 공식 원문에 더 자세한 금액(소득 구간별 금액 등)이 있으면 그 금액도 함께 쓰세요."
             : "공식 원문을 찾지 못했습니다. google_search로 확인하고 공식 공고 확인이 필요하다고 밝히세요.",
         };
         addTrace({

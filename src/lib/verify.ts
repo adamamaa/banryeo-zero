@@ -183,10 +183,10 @@ export function verifyAnswer(
     );
   }
 
-  // 금액: 정책 금액이 가장 최근 공식 원문과 같은지
+  // 금액: 정책 금액이 가장 최근 공식 원문(같은 해의 다른 공식 원문 포함)과 같은지
   const officialUsed = pickOfficial(opts.official || []);
   if (card && officialUsed.length) {
-    const issues = findAmountIssues(card, officialUsed);
+    const issues = findAmountIssues(card, opts.official || []);
     checks.push(
       issues.length
         ? {

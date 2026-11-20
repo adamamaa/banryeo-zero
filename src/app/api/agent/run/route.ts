@@ -314,14 +314,14 @@ export async function POST(req: NextRequest) {
       const today = localYmd();
       add(
         [...youth.n, ...welfare.n, ...gov.n].filter((n) => n.applyEnd && n.applyEnd >= today).sort((a, b) => byDeadline(a, b, today)),
-        10
+        6
       );
-      add(youth.n, 5);
-      add(welfare.n, 3);
-      add(gov.n, 3);
-      add(youth.n, 10);
-      add(welfare.n, 6);
-      add(gov.n, 6);
+      // 남은 자리는 출처를 하나씩 번갈아 채운다 (마감일이 없는 복지로가 밀려나지 않게)
+      for (let grew = true; grew && notices.length < 10; ) {
+        const before = notices.length;
+        for (const list of [youth.n, welfare.n, gov.n]) if (notices.length < 10) add(list, 1);
+        grew = notices.length > before;
+      }
       return NextResponse.json({
         connected: true,
         sources: [...(youth.ok ? ["온통청년"] : []), ...(welfare.ok ? ["복지로"] : []), ...(gov.ok ? ["보조금24"] : [])],

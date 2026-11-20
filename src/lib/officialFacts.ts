@@ -121,7 +121,13 @@ export function findAmountIssues(card: AnswerCard, records: OfficialRecord[]): A
         return n.includes(q) && queries.filter((x) => n.includes(x)).length === 1;
       }),
     ];
-    const ok = supportedBy(rec);
+    // 기준 원문과 같은 해의 다른 공식 원문(출처가 달라도)에 있는 금액도 인정한다.
+    // 출처마다 적은 내용의 자세함이 달라서다. 예전 해 기록의 옛 금액은 여전히 걸러진다.
+    const year = rec.updated.slice(0, 4);
+    const checks = records
+      .filter((r) => r === rec || (r.exact && r.query === rec.query && r.updated.slice(0, 4) === year))
+      .map(supportedBy);
+    const ok = (won: number) => checks.some((f) => f(won));
     for (const seg of segments) {
       for (const a of amountsIn(seg)) {
         const around = seg.slice(Math.max(0, a.index - 10), a.index + a.text.length + 6);
