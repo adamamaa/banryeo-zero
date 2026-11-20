@@ -1347,11 +1347,10 @@ export default function Page() {
           >
             <div className="flex flex-col space-y-4">
               <div className="flex items-center justify-between px-1.5 pt-1">
-                <div className="flex items-center space-x-2.5">
-                  {/* 파비콘과 같은 파일을 로고로 쓴다 */}
+                <div className="flex items-center">
+                  {/* 가로형 로고 (심볼 + 글자). 파비콘은 같은 심볼로 src/app/icon.png, favicon.ico, apple-icon.png */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/icon.svg" alt="" width={32} height={32} className="h-8 w-8 shrink-0" />
-                  <span className="font-semibold text-[17px] tracking-tight text-slate-900">반려제로</span>
+                  <img src="/brand/banryeozero-logo.png" alt="반려제로" width={989} height={320} className="h-8 w-auto" />
                 </div>
                 <button
                   aria-label="사이드바 닫기"
