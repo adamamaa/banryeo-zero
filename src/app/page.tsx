@@ -1826,8 +1826,11 @@ export default function Page() {
 
           <div key={panelHasData ? view + ctx : "empty"} className="stagger flex-1 space-y-4 overflow-y-auto p-5">
             {!panelHasData ? (
-              <div className="flex h-full min-h-[260px] items-center justify-center">
+              <div className="flex h-full min-h-[260px] flex-col items-center justify-center gap-4">
                 <Empty text="질문을 입력하거나 서류를 첨부하면 점검 결과가 여기에 표시됩니다." />
+                <div className="w-full max-w-md">
+                  <SampleDocs withNotice />
+                </div>
               </div>
             ) : (
               <>
@@ -2013,8 +2016,9 @@ export default function Page() {
                 <div className="space-y-2 px-4 pb-4 text-xs leading-relaxed text-slate-500">
                   <p>채팅 입력창의 클립 버튼으로 공고문을 먼저 올리거나 정책을 고르면 그 공고 기준으로 검수합니다.</p>
                   <p className="rounded-lg bg-amber-50/70 px-3 py-2 text-amber-900">
-                    이미지·PDF는 판독을 위해 원본이 AI 서버로 전송됩니다. 주민번호 뒷자리 등 민감한 정보는 가린 뒤 올려 주세요. 텍스트(.txt)는 주민번호·연락처·계좌를 가린 뒤 전송합니다.
+                    이미지·PDF는 판독을 위해 원본이 AI 서버(Google Gemini)로 전송됩니다. 주민번호 뒷자리 등 민감한 정보는 가린 뒤 올려 주세요. 텍스트(.txt)는 주민번호·연락처·계좌를 가린 뒤 전송합니다.
                   </p>
+                  <SampleDocs withNotice />
                 </div>
               </Card>
             )}
@@ -2200,8 +2204,10 @@ export default function Page() {
               <section>
                 <h3 className="text-[13px] font-semibold">개인정보와 저장</h3>
                 <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                  대화 기록, 도구 목록, API 키는 이 브라우저에만 저장됩니다. 이미지·PDF 서류는 판독을 위해 원본이
-                  외부 AI 서버로 전송됩니다.
+                  대화 기록, 내 정보, 도구 목록, API 키는 이 브라우저에만 저장되고 반려제로 서버에는 남지 않습니다.
+                  질문하면 답변을 만들기 위해 질문, 이전 대화, 내 정보(지역·나이·소득 등 조건), 첨부 서류가 Google Gemini로
+                  전송되고, 추천 공고를 찾을 때 지역이 공공 데이터 조회(복지로 등)에 쓰입니다. 이미지·PDF 서류는 원본이, 텍스트
+                  서류는 주민번호·연락처·계좌를 가린 뒤 전송됩니다. 체험할 때는 실제 정보 대신 예시 값과 가상 서류를 써 주세요.
                 </p>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <button
@@ -3443,6 +3449,48 @@ function PolicyDocs({
   );
 }
 
+// 심사·체험용 가상 서류 (public/sample-docs). 실제 서류를 올리지 않고도 검수를 해 볼 수 있게 한다.
+const SAMPLE_DOCS = [
+  { label: "A 반려 위험 세트", dir: "A_미비세트", files: ["주민등록등본.png", "임대차계약서.png", "가족관계증명서.png"] },
+  { label: "B 보완 완료 세트", dir: "B_보완세트", files: ["주민등록등본.png", "임대차계약서.png", "가족관계증명서.png"] },
+  { label: "C 대구 월세 세트", dir: "C_대구시연세트", files: ["주민등록등본.txt", "임대차계약서.txt", "중개보수영수증.txt"] },
+];
+
+function SampleDocs({ withNotice = false }: { withNotice?: boolean }) {
+  const link = (path: string, saveAs: string, text: string) => (
+    <a
+      key={path}
+      href={encodeURI(`/sample-docs/${path}`)}
+      download={saveAs}
+      className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 hover:border-purple-200 hover:text-brand-700"
+    >
+      <Download className="h-3 w-3" />
+      {text}
+    </a>
+  );
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs">
+      <p className="font-medium text-slate-700">가상 서류로 체험하기</p>
+      <p className="mt-0.5 text-slate-500">실제 서류 대신 아래 시연용 가상 서류를 받아 올려 보세요. 실제 사람의 서류가 아닙니다.</p>
+      <ul className="mt-2 space-y-1.5">
+        {SAMPLE_DOCS.map((s) => (
+          <li key={s.dir} className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-slate-500">{s.label}</span>
+            {s.files.map((f) => link(`${s.dir}/${f}`, `${s.dir}_${f}`, f.replace(/\.\w+$/, "")))}
+          </li>
+        ))}
+        {withNotice && (
+          <li className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-slate-500">가상 공고문</span>
+            {link("공고문_예시.txt", "공고문_예시.txt", "공고문 예시")}
+            <span className="text-slate-400">채팅 입력창 클립 버튼으로 올려 보세요</span>
+          </li>
+        )}
+      </ul>
+    </div>
+  );
+}
+
 function PolicyAudit({
   p,
   st,
@@ -3472,9 +3520,13 @@ function PolicyAudit({
             </label>
           }
         />
-        <p className="px-4 pb-3 text-xs text-slate-500">
-          AI가 판독합니다. 텍스트 서류는 주민번호 등을 가린 뒤 보내고, 이미지·PDF는 원본이 전송됩니다. 서버에 저장하지 않습니다.
-        </p>
+        <div className="space-y-2 px-4 pb-4 text-xs text-slate-500">
+          <p>
+            AI(Google Gemini)가 판독합니다. 텍스트 서류는 주민번호 등을 가린 뒤 보내고, 이미지·PDF는 원본이 전송됩니다. 서버에
+            저장하지 않습니다.
+          </p>
+          <SampleDocs />
+        </div>
       </Card>
       {st.audit ? (
         <AuditReport audit={st.audit} display={display} />

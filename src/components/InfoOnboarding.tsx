@@ -692,7 +692,10 @@ export function WelcomeModal({
             <button type="button" onClick={onClose} className="mt-2 w-full py-2 text-[13px] text-slate-500 hover:text-slate-800">
               나중에 할게요
             </button>
-            <p className="mt-2 text-[11px] text-slate-400">입력한 정보는 이 브라우저에만 저장되고 언제든 고칠 수 있어요.</p>
+            <p className="mt-2 text-balance text-[11px] leading-relaxed text-slate-400">
+              입력한 정보는 이 브라우저에만 저장되고 언제든 고칠 수 있어요. 답변과 추천을 만들 때는 이름·연락처 없이 조건만
+              Google Gemini와 공공 데이터 조회에 보내요. 체험할 땐 실제 정보 대신 예시 값을 넣어도 돼요.
+            </p>
           </div>
         )}
 
