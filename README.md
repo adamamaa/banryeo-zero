@@ -61,7 +61,7 @@ http://localhost:3000 (Windows는 `실행하기.bat` 더블클릭)
 | 오픈소스 | TypeScript | Apache-2.0 |
 | 오픈소스 | lucide-react | ISC |
 | 폰트 | Pretendard (길형진), Inter (Rasmus Andersson) | SIL OFL 1.1 |
-| 데이터 | 온통청년 청년정책 API, 공공데이터포털 대한민국 공공서비스(혜택) 정보, 지자체복지서비스, 중앙부처복지서비스 | 각 제공기관 이용 조건 |
+| 데이터 | 온통청년 청년정책 API, 공공데이터포털 대한민국 공공서비스(혜택) 정보, 지자체복지서비스, 중앙부처복지서비스 | 공공데이터포털 이용허락범위 제한 없음 (2026-11-21 확인) |
 | 데이터 | ScrapeCreators 인스타그램 API (Treg 경유, 캡션·대본 텍스트만) | 각 서비스 이용 조건 |
 | AI | Google Gemini API (서비스), Claude·Claude Code·Google Antigravity·Google Stitch·Google Nano Banana·Google Neon (개발) | 각 서비스 약관 |
 | 로고 | 반려제로 로고·심볼: AI 생성 (Google Nano Banana, SVG 변환 Google Neon) | – |
