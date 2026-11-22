@@ -12,6 +12,7 @@ import { downloadName, fileMeta } from "@/lib/fileExport";
 import { applyOfficial } from "@/lib/officialFacts";
 import { byDeadline, localYmd } from "@/lib/deadline";
 import { isTrustedSource } from "@/lib/verify";
+import { pathNote } from "@/lib/pathNote";
 import { fetchInstagramPost, findInstagramUrl, type InstagramPost } from "@/lib/instagram";
 
 // 질문에 넣은 인스타그램 게시물의 캡션·대본을 AI에 넘길 자료로 만든다. 내용은 검증 대상이지 사실이 아니다.
@@ -753,7 +754,10 @@ ${CARD_FORMAT}`,
                 checklist: out.checklist,
                 files: out.files,
                 plan: out.plan,
-                reply: `${out.ask.question}${out.ask.reason ? `\n\n필요한 이유: ${out.ask.reason}` : ""}`,
+                // 이미 정해진 판정(예: 특례 불가)이 있으면 되묻기 앞에 조건부 결론을 먼저 알린다
+                reply: [pathNote(out.summary), out.ask.question, out.ask.reason && `필요한 이유: ${out.ask.reason}`]
+                  .filter(Boolean)
+                  .join("\n\n"),
                 toolExecutions: traces,
                 summary: out.summary,
                 sources: [],
