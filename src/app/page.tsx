@@ -1496,6 +1496,9 @@ export default function Page() {
                   <Plug className="w-4 h-4" />
                 </span>
               </div>
+              <a href="/privacy" className="block px-2 pt-1 text-[11px] text-slate-400 hover:text-slate-600 hover:underline">
+                개인정보처리방침
+              </a>
             </div>
           </div>
         </aside>
@@ -2031,7 +2034,7 @@ export default function Page() {
                 <div className="space-y-2 px-4 pb-4 text-xs leading-relaxed text-slate-500">
                   <p>채팅 입력창의 클립 버튼으로 공고문을 먼저 올리거나 정책을 고르면 그 공고 기준으로 검수합니다.</p>
                   <p className="rounded-lg bg-amber-50/70 px-3 py-2 text-amber-900">
-                    이미지·PDF는 판독을 위해 원본이 AI 서버(Google Gemini)로 전송됩니다. 주민번호 뒷자리 등 민감한 정보는 가린 뒤 올려 주세요. 텍스트(.txt)는 주민번호·연락처·계좌를 가린 뒤 전송합니다.
+                    이미지·PDF는 판독을 위해 원본이 AI 서버(Google Gemini)로 전송됩니다. 주민번호 뒷자리 등 민감한 정보는 가린 뒤 올려 주세요(등본은 정부24에서 뒷자리 미표시로 발급할 수 있습니다). 텍스트(.txt)는 주민번호·연락처·계좌를 가린 뒤 전송합니다.
                   </p>
                   <SampleDocs withNotice />
                 </div>
@@ -2224,7 +2227,10 @@ export default function Page() {
                   전송되고, 추천 공고를 찾을 때 지역이 공공 데이터 조회(복지로 등)에 쓰입니다. 이미지·PDF 서류는 원본이, 텍스트
                   서류는 주민번호·연락처·계좌를 가린 뒤 전송됩니다. 인스타그램 링크를 넣으면 게시물의 캡션과 대본(텍스트)만
                   Treg·ScrapeCreators API로 가져와 분석하며, 영상·이미지는 받지 않습니다. 체험할 때는 실제 정보 대신 예시 값과 가상
-                  서류를 써 주세요.
+                  서류를 써 주세요.{" "}
+                  <a href="/privacy" className="font-medium text-brand-700 underline-offset-2 hover:underline">
+                    개인정보처리방침 전체 보기
+                  </a>
                 </p>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <button

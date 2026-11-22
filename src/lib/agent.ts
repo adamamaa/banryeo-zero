@@ -551,11 +551,16 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
       .trim();
 
     // 서버에서 실행된 검색 (Gemini가 직접 실행)
+    // make_plan과 같은 응답에서 검색했으면 계획을 저장한 뒤에 체크한다 (먼저 체크하면 계획의 검색 단계가 빈 채로 남는다)
+    const planInTurn = parts.some((p) => p.functionCall?.name === "make_plan");
+    const searchSteps: string[] = [];
     for (const p of parts) {
       if (p.toolCall?.toolType === "GOOGLE_SEARCH_WEB") {
         const queries = strs(p.toolCall.args?.queries, 4);
         usedSearch = true;
-        step("google_search", `웹 검색: ${queries[0] || "최신 공고"}`);
+        const label = `웹 검색: ${queries[0] || "최신 공고"}`;
+        if (planInTurn) searchSteps.push(label);
+        else step("google_search", label);
         addTrace({
           toolName: "google_search",
           title: `웹 검색 ${queries.length}건`,
@@ -692,6 +697,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           .slice(0, 6);
         if (!steps.some((x) => x.tool === "answer")) steps.push({ label: "답변 정리", tool: "answer", done: false });
         plan = steps;
+        for (const label of searchSteps) step("google_search", label);
         addTrace({
           toolName: "make_plan",
           title: `실행 계획 ${plan.length}단계`,
