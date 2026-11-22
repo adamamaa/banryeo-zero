@@ -51,7 +51,7 @@ http://localhost:3000 (Windows는 `실행하기.bat` 더블클릭)
 
 ## 제출 문서
 
-해커톤 제출 문서 초안은 [`docs/`](docs/README.md)에 있다.
+프로젝트 소개서는 [`docs/소개서/`](docs/소개서/)에 있다.
 
 ## Credits / Licenses
 
@@ -67,4 +67,4 @@ http://localhost:3000 (Windows는 `실행하기.bat` 더블클릭)
 | 로고 | 반려제로 로고·심볼: AI 생성 (Google Nano Banana, SVG 변환 Google Neon) | – |
 | 시연 자료 | `public/sample-docs`의 가상 서류·가상 공고문 | 팀 제작, 실제 인물 아님 |
 
-자세한 링크와 기준일은 [docs/04_별첨_활용한_외부자원_출처.md](docs/04_별첨_활용한_외부자원_출처.md)에 있다.
+자세한 링크와 기준일은 프로젝트 소개서 별첨에 있다.

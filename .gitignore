@@ -8,3 +8,7 @@ node_modules
 **/.env.*
 !.env.local.example
 *.tsbuildinfo
+
+# 팀 내부 작업 문서(초안·제출 안내·인수인계)는 로컬에만 둔다. 공개 문서는 docs/소개서/
+/docs/*
+!/docs/소개서/
