@@ -4,7 +4,7 @@ import Link from "next/link";
 export const metadata: Metadata = { title: "개인정보처리방침 | 반려제로" };
 
 // 보호책임자 연락처. 팀 이메일이 정해지면 여기만 바꾼다.
-const CONTACT = { name: "반려제로 팀", label: "GitHub 이슈", href: "https://github.com/adamamaa/gonggo-pass/issues" };
+const CONTACT = { name: "반려제로 팀", label: "GitHub 이슈", href: "https://github.com/adamamaa/banryeo-zero/issues" };
 const EFFECTIVE = "2026년 11월 22일";
 
 const H = ({ children }: { children: React.ReactNode }) => (
