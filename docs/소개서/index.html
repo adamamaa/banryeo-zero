@@ -98,9 +98,9 @@
       </ul></div></div>
     <div><span class="num">2</span><div class="box" style="height:255px"><h3>해결 방안</h3>
       <ul>
-        <li>Gemini 기반 에이전트가 <b>도구 11개</b> 중 필요한 것을 스스로 골라 공고 탐색 → 자격 판정 → 서류 교차 검수 → 보완 안내를 잇는다</li>
+        <li>Gemini 기반 에이전트가 <b>도구 11개</b> 중 필요한 것을 골라 공고 탐색, 자격 판정, 서류 교차 검수, 보완 안내까지 차례로 처리한다</li>
         <li>소득 비율·공제·특례·마감 판정은 <b>서버 코드</b>가 계산한다</li>
-        <li>답변은 내보내기 전에 공식 원문과 금액·날짜·출처를 대조해 다시 검증한다</li>
+        <li>답변을 보내기 전에 금액·날짜·출처를 공식 원문과 한 번 더 대조한다</li>
       </ul></div></div>
     <div><span class="num">3</span><div class="box" style="height:255px"><h3>구현 현황</h3>
       <ul>
@@ -123,7 +123,7 @@
   <p class="lead">받을 수 있는 돈인데, 청년은 조건을 확인하다가 포기한다</p>
   <div class="grid" style="grid-template-columns: 0.9fr 1.25fr; gap:18px">
     <div class="grid" style="gap:10px">
-      <div class="card"><h3>① 조건문 미로</h3>공고는 본문·별표·주석에 "단, ~인 경우 제외" 같은 탈락 조건을 흩어 놓는다. 읽을수록 확신은 줄고 할 일만 는다.</div>
+      <div class="card"><h3>① 조건문 미로</h3>공고는 본문·별표·주석에 "단, ~인 경우 제외" 같은 탈락 조건을 흩어 놓는다. 끝까지 읽어도 내가 대상인지 확신하기 어렵다.</div>
       <div class="card"><h3>② '일상의 나' ≠ '행정 데이터의 나'</h3>월급, 사는 기간 같은 내 사정을 소득평가액·전입일 같은 행정 기준으로 바꿔야 자격을 안다.</div>
       <div class="card"><h3>③ 심사는 사후 판정</h3>반차를 내고 서류를 떼도 주소 한 글자, 직인 하나가 틀리면 보완 요청이 오고, 못 고치면 0원이 된다.</div>
     </div>
@@ -139,7 +139,7 @@
       <div class="callout" style="margin-top:12px">
         <b>"대상이 아니라서"는 정말 대상이 아닐까?</b> 청년월세 소득 기준은 세전 월급이 아니라 <b>근로소득 30%를 공제한 소득평가액</b>이다. 월 180만 원을 버는 청년은 세전으로 1인 기준 중위소득 70%라 "안 된다"고 보기 쉽지만, 공제하면 <b>49%</b>로 기준(60%) 안에 든다.
       </div>
-      <div class="src" style="margin-top:8px">출처: youth.incheon.go.kr/donggu/vote/voteAnswResult.do?vote_seq=158 · gonggam.korea.kr (K-공감 873호) · view.asiae.co.kr/article/2026091808415254712 · 국토교통부 매뉴얼 12·53쪽. 설문은 표본과 질문이 서로 달라 하나의 통계로 합치지 않았다.</div>
+      <div class="src" style="margin-top:8px">출처: youth.incheon.go.kr/donggu/vote/voteAnswResult.do?vote_seq=158 · gonggam.korea.kr (K-공감 873호) · view.asiae.co.kr/article/2026091808415254712 · 국토교통부 매뉴얼 12·53쪽.</div>
     </div>
   </div>
   <div class="foot"><span>2026 대한민국 청년 CAREER FAIR AI 해커톤 | 프로젝트 소개서</span><span>2</span></div>
@@ -149,7 +149,7 @@
 <section class="slide">
   <h1><span class="no">02</span>대상 사용자</h1>
   <div class="grid g2" style="margin-top:16px">
-    <div class="box" style="height:270px"><h3>주요 사용자 (Primary)</h3>
+    <div class="box" style="height:270px"><h3>주요 사용자</h3>
       <ul>
         <li>주거·취업·생활 지원사업을 <b>혼자 준비하는 19~34세 청년</b></li>
         <li>자취를 시작한 사회초년생, 구직자처럼 행정 용어와 증빙 서류에 익숙하지 않은 사람</li>
@@ -161,7 +161,7 @@
       <ul>
         <li><b>청년센터 상담사:</b> 사용자가 가져온 사전 점검 결과(판정 근거·빠진 서류)로 상담을 시작할 수 있다</li>
         <li><b>지자체 사업 담당자:</b> 불완전한 서류와 보완 요청이 줄어든다</li>
-        <li>둘 다 아직 실제로 함께 검증하지 않은 <b>확장 단계의 협력 대상</b>이다 (08 기대효과 참고)</li>
+        <li>두 기관과의 협력은 아직 검증 전이며, 08 기대효과의 <b>시범 사업</b>에서 확인할 계획이다</li>
       </ul>
     </div>
   </div>
@@ -193,7 +193,7 @@
       <ul>
         <li>공고마다 조건 구조가 다르다 (별표·단서·특례 경로). 고정 규칙으로는 모든 공고를 읽을 수 없다</li>
         <li>서류는 등본·계약서·영수증마다 형식이 제각각이고, 사용자는 일상 언어로 묻는다</li>
-        <li>반대로 <b>숫자 판정은 AI에 맡기지 않는다.</b> AI는 읽고 고르고, 계산은 코드가 한다</li>
+        <li><b>숫자 판정은 AI에 맡기지 않는다.</b> 공고를 읽고 도구를 고르는 일은 AI가, 소득 비율·공제 계산은 서버 코드가 맡는다</li>
       </ul>
     </div>
   </div>
@@ -218,7 +218,7 @@
       <div style="font-weight:700;color:var(--navy);margin-bottom:8px">서비스 구조도 (아키텍처)</div>
       <div class="node"><b>사용자 브라우저 (Next.js 화면)</b>내 정보는 브라우저에만 저장 · 왼쪽 맞춤 공고 · 오른쪽 점검 패널</div>
       <div class="down">↓ 질문·서류 &nbsp;&nbsp; ↑ 진행 단계·답변 (SSE)</div>
-      <div class="node"><b>/api/agent/run — 에이전트 루프</b>프레임워크 없이 직접 구현 · 최대 9턴 · 260초 예산</div>
+      <div class="node"><b>/api/agent/run (에이전트 루프)</b>프레임워크 없이 직접 구현 · 최대 9턴 · 260초 예산</div>
       <div class="down">↓ ↑</div>
       <div class="grid g2" style="gap:8px">
         <div class="node ai"><b>Google Gemini API</b>gemini-4-hydrogen<br>Function Calling · Google Search</div>
@@ -285,7 +285,7 @@
       </ul>
     </div>
   </div>
-  <div class="box" style="margin-top:14px"><h3>주요 사용자 이용 흐름 (Happy Path)</h3>
+  <div class="box" style="margin-top:14px"><h3>주요 사용자 이용 흐름</h3>
     <div class="flow" style="margin-top:4px">
       <div class="step"><b>① 내 정보 선택</b>지역·나이·소득·주거 등을 눌러서 고른다. 왼쪽에 맞춤 공고 10건이 마감 순으로 뜬다</div><span class="arr">›</span>
       <div class="step"><b>② 공고 선택·질문</b>"청년월세 받을 수 있어?" 에이전트의 계획과 도구 실행이 실시간으로 보인다</div><span class="arr">›</span>
@@ -301,21 +301,21 @@
 <!-- 06 차별점 -->
 <section class="slide">
   <h1><span class="no">06</span>차별점</h1>
-  <p class="lead">정책을 찾아 주는 데서 끝나지 않고, 신청 전에 반려 위험을 찾아 보완까지 돕는 사전 예방형 에이전트</p>
+  <p class="lead">정책 검색에 더해, 신청 전에 반려 위험을 찾고 보완까지 돕는 에이전트</p>
   <div class="box"><h3>기존 서비스와 차별화 요소 및 사용자에게 주는 효과</h3>
     <table>
-      <tr><th style="width:22%">기존 서비스</th><th style="width:34%">하는 일</th><th>반려제로가 더하는 것 → 사용자 효과</th></tr>
-      <tr><td class="k">복지로 정책별 모의계산</td><td>정책 하나를 골라 소득·재산을 직접 입력하면 대상 여부 계산</td><td>일상 언어로 묻기만 하면 여러 정책에 대해 공제·특례 경로까지 계산, 빠진 정보만 되묻기 → <b>입력 부담과 오판 감소</b></td></tr>
-      <tr><td class="k">온통청년·보조금24 맞춤 검색</td><td>나이·지역·관심 분야로 정책 목록 검색</td><td>목록에서 끝나지 않고 원문 대조, 자격 판정, 서류 검수까지 연결 → <b>여러 사이트를 오가지 않음</b></td></tr>
-      <tr><td class="k">정책 안내 SNS 게시물</td><td>정책을 빠르게 알림</td><td>게시물 링크를 공식 공고와 대조해 마감·차이를 알림 → <b>지난 공고·과장 정보에 시간 낭비 방지</b></td></tr>
-      <tr><td class="k">기관의 서류 보완 요청</td><td>접수 뒤 담당자가 서류를 보고 보완을 요청</td><td><b>접수 전에</b> 서류끼리 대조해 불일치를 찾음 → <b>보완 기한·직권 취소 위험 감소</b></td></tr>
+      <tr><th style="width:22%">기존 서비스</th><th style="width:34%">하는 일</th><th>반려제로가 더하는 것과 사용자 효과</th></tr>
+      <tr><td class="k">복지로 정책별 모의계산</td><td>정책 하나를 골라 소득·재산을 직접 입력하면 대상 여부 계산</td><td>일상 언어로 묻기만 하면 여러 정책에 대해 공제·특례 경로까지 계산, 빠진 정보만 되묻기. <b>입력 부담과 오판 감소</b></td></tr>
+      <tr><td class="k">온통청년·보조금24 맞춤 검색</td><td>나이·지역·관심 분야로 정책 목록 검색</td><td>검색 결과에 이어 원문 대조, 자격 판정, 서류 검수까지 한 번에 진행. <b>여러 사이트를 오가지 않음</b></td></tr>
+      <tr><td class="k">정책 안내 SNS 게시물</td><td>정책을 빠르게 알림</td><td>게시물 링크를 공식 공고와 대조해 마감·차이를 알림. <b>지난 공고·과장 정보에 시간 낭비 방지</b></td></tr>
+      <tr><td class="k">기관의 서류 보완 요청</td><td>접수 뒤 담당자가 서류를 보고 보완을 요청</td><td><b>접수 전에</b> 서류끼리 대조해 불일치를 찾음. <b>보완 기한·직권 취소 위험 감소</b></td></tr>
     </table>
   </div>
   <div class="grid g4" style="margin-top:14px">
     <div class="card"><span class="num">1</span><h3>제출 전 서류 교차 검수</h3>서류 하나가 아니라 서류 사이의 불일치를 본다. 공공 포털은 접수 뒤에야 알려 준다.</div>
-    <div class="card"><span class="num">2</span><h3>한 끗 차이 진단</h3>"대상 아님"에서 끝내지 않고 무엇을 얼마나 바꾸면 받는지 계산한다.</div>
+    <div class="card"><span class="num">2</span><h3>한 끗 차이 진단</h3>대상이 아닐 때 무엇을 얼마나 바꾸면 받을 수 있는지 계산한다.</div>
     <div class="card"><span class="num">3</span><h3>SNS 게시물 검증</h3>청년이 정책을 처음 보는 릴스·카드뉴스를 공식 공고와 대조한다.</div>
-    <div class="card"><span class="num">4</span><h3>역방향 접근 + 규칙 검증</h3>'받을 수 있나'보다 '왜 떨어질까'에서 출발하고, AI 해석과 서버 계산을 나눠 오답을 줄인다.</div>
+    <div class="card"><span class="num">4</span><h3>역방향 접근 + 규칙 검증</h3>떨어질 이유부터 찾고, AI 해석과 서버 계산을 나눠 오답을 줄인다.</div>
   </div>
   <div class="src" style="margin-top:8px">비교는 각 서비스 화면에서 공개적으로 보이는 기능 기준 (2026-11-21 확인).</div>
   <div class="foot"><span>2026 대한민국 청년 CAREER FAIR AI 해커톤 | 프로젝트 소개서</span><span>7</span></div>
@@ -324,7 +324,7 @@
 <!-- 07 구현 현황 및 프로토타입 -->
 <section class="slide">
   <h1><span class="no">07</span>구현 현황 및 프로토타입</h1>
-  <p class="lead" style="margin-bottom:12px">https://banryeo-zero.vercel.app/ — 로그인 없이 접속해 가상 서류로 바로 체험할 수 있다 (아래는 가상 프로필로 실제 실행한 화면)</p>
+  <p class="lead" style="margin-bottom:12px">https://banryeo-zero.vercel.app/ 에서 로그인 없이 가상 서류로 바로 체험할 수 있다 (아래는 가상 프로필로 실행한 화면)</p>
   <div class="grid" style="grid-template-columns: 520px 624px; gap:24px">
     <div>
       <div class="crop" style="width:520px;height:468px"><img src="img/eligibility.jpg" alt="청년월세 자격 확인 결과" style="width:1192px;margin-left:-656px;margin-top:-47px"></div>
@@ -397,7 +397,7 @@
         <li>질문 1건당 Gemini 호출 4~10회, <b>약 130~770원</b> (Standard 요금·환율 1,400원 기준 추정), 질문 1,000건에 약 13만~77만 원</li>
         <li>사용자 정보를 서버에 저장하지 않아 DB·보안 운영 부담이 작다. 공공 API 키와 AI 사용량 한도만 관리</li>
         <li>요청마다 호출 수·토큰·비용을 기록해 확대할 때 비용을 숫자로 관리</li>
-        <li>정책이 늘어도 공고 탐색 → 자격 대조 → 서류 검수 → 보완 안내 흐름은 그대로 쓴다</li>
+        <li>정책이 늘어도 공고 탐색부터 보완 안내까지 같은 흐름을 그대로 쓴다</li>
       </ul></div>
   </div>
   <div class="box" style="margin-top:14px"><h3>사용자·기능 확대 시 발전 방안</h3>
@@ -431,7 +431,7 @@
       <table>
         <tr><th style="width:32%">구분</th><th>내용</th></tr>
         <tr><td class="k">해커톤 이전 개발 범위</td><td>해당 없음</td></tr>
-        <tr><td class="k">해커톤 기간 중 개발 범위</td><td>전체. 2026-11-16 개발 시작 (첫 커밋 2026-11-16, 11-09 이전 커밋 없음)</td></tr>
+        <tr><td class="k">해커톤 기간 중 개발 범위</td><td>전체 (2026-11-16 개발 시작)</td></tr>
         <tr><td class="k">타 공모전 출품·수상 여부</td><td>해당 없음</td></tr>
       </table>
     </div>
@@ -460,7 +460,7 @@
     <tr><td class="k">외부 데이터·API</td><td>지자체복지서비스 · 중앙부처복지서비스 (복지로)</td><td>한국사회보장정보원 / 공공데이터포털 15108347 · 15090532 · 이용허락범위 제한 없음, 무료</td><td>왼쪽 맞춤 공고, 복지 공고 원문 확인</td></tr>
     <tr><td class="k">외부 데이터·API</td><td>온통청년 청년정책 API</td><td>한국고용정보원 / 공공데이터포털 15143273 · 이용허락범위 제한 없음, 무료</td><td>왼쪽 맞춤 공고, 대안 공고 탐색</td></tr>
     <tr><td class="k">외부 데이터</td><td>2026년 기준 중위소득</td><td>보건복지부 고시 · 저작권법 제7조 제2호의 보호받지 않는 저작물</td><td>자격 판정 (소득 비율 계산)</td></tr>
-    <tr><td class="k">외부 데이터·API</td><td>인스타그램 게시물 캡션·대본 (사용자가 넣은 링크만)</td><td>ScrapeCreators API (Treg 경유) · 반환 데이터 이용 제한 없음, 원 사이트 약관 준수는 이용자 책임 → 공개 게시물 1건만 조회, 영상·이미지 저장 안 함</td><td>SNS 게시물 검증</td></tr>
+    <tr><td class="k">외부 데이터·API</td><td>인스타그램 게시물 캡션·대본 (사용자가 넣은 링크만)</td><td>ScrapeCreators API (Treg 경유) · 공개 게시물만 1건씩 조회하고 영상·이미지는 저장하지 않음</td><td>SNS 게시물 검증</td></tr>
     <tr><td class="k">외부 데이터</td><td>정책 공식 원문·안내 페이지</td><td>각 정책 소관 기관 (.go.kr 등) · 각 기관 저작권 정책</td><td>답변 근거, 출처 링크</td></tr>
     <tr><td class="k">AI 모델</td><td>Google Gemini API (gemini-4-hydrogen), Google Search 연동</td><td>Google · Gemini API 이용약관</td><td>서비스 AI 전체 (질문 해석, 도구 선택, 서류 판독, 답변)</td></tr>
     <tr><td class="k">개발 도구</td><td>Claude Code 2.1.220 (Claude Opus 5.5·Fable 5.2), Claude</td><td>Anthropic</td><td>서비스 코드 대부분 작성, 자료조사, QA, 문서 초안·시연영상 편집 보조</td></tr>
