@@ -106,7 +106,7 @@
       <ul>
         <li>배포 완료, 로그인 없이 바로 사용 (Vercel)</li>
         <li>공공 API 4종 실시간 연동: 온통청년·보조금24·복지로(지자체·중앙부처)</li>
-        <li>가상 신청자 15명 테스트: 정답 7명 → 보완 뒤 <b>11명</b>, 오판 3명 → <b>0명</b></li>
+        <li>가상 신청자 15명 테스트: 정답 7명 → 보완 뒤 <b>13명</b>, 오판 3명 → <b>0명</b></li>
         <li>가상 서류 3건에서 반려 위험 5건 탐지 (서류 간 주소·성명 불일치 포함)</li>
       </ul></div></div>
   </div>
@@ -351,14 +351,15 @@
       <tr><td>특례 경로를 일반 조건과 섞음</td><td>조건을 모두 "그리고"로 판정</td><td>조건을 경로로 나눠 하나만 충족하면 되게</td><td class="ok">경로 3개 미충족 → 불가</td></tr>
       <tr><td>주택 보유 청년에게 부모 소득을 되물음</td><td>무주택·재산 조건 누락</td><td>무주택·재산 판정 추가, 이미 미충족이면 묻지 않음</td><td class="ok">무주택 미충족 → 불가</td></tr>
       <tr><td>지난 마감을 신청 가능처럼 안내할 위험</td><td>AI가 오늘 날짜를 모름</td><td>한국 시간 오늘 날짜를 넣고 답변의 날짜 검사</td><td class="ok">마감 안내 정상</td></tr>
+      <tr><td>특례가 모두 안 되는데 부모 소득만 되물음</td><td>이미 정해진 판정을 답변에 안 씀</td><td>되묻기 앞에 특례 미충족 이유와 남은 조건 표시</td><td class="ok">조건부 결론 + 되묻기</td></tr>
     </table>
     <table>
       <tr><th>지표</th><th style="text-align:center">첫 실행</th><th style="text-align:center">보완 뒤</th></tr>
-      <tr><td class="k">정답</td><td style="text-align:center">7명</td><td style="text-align:center" class="ok">11명</td></tr>
-      <tr><td class="k">부분 정답</td><td style="text-align:center">4명</td><td style="text-align:center">4명</td></tr>
+      <tr><td class="k">정답</td><td style="text-align:center">7명</td><td style="text-align:center" class="ok">13명</td></tr>
+      <tr><td class="k">부분 정답</td><td style="text-align:center">4명</td><td style="text-align:center">2명</td></tr>
       <tr><td class="k">오판</td><td style="text-align:center">3명</td><td style="text-align:center" class="ok">0명</td></tr>
       <tr><td class="k">판단 보류</td><td style="text-align:center">1명</td><td style="text-align:center">0명</td></tr>
-      <tr><td colspan="3" class="src">보완 뒤 결과는 배포 사이트 재실행 4명과 모의 실행 1명으로 확인. 정답은 국토교통부 매뉴얼과 복지로 2026 안내로 다시 정함.</td></tr>
+      <tr><td colspan="3" class="src">보완 뒤 결과는 배포 사이트 재실행 6명과 모의 실행 1명으로 확인. 정답은 국토교통부 매뉴얼과 복지로 2026 안내로 다시 정함.</td></tr>
     </table>
   </div>
   <div class="grid g2" style="margin-top:14px">
@@ -403,7 +404,7 @@
     <table>
       <tr><th style="width:19%">발전안</th><th>적용 방식</th></tr>
       <tr><td class="k">결과 캐시</td><td>공개 공고·추출한 자격 조건·공통 서류 목록을 공고 ID·수정일 기준으로 저장해 반복 조회와 AI 분석 비용을 줄인다. 개인별 결과와 원본 증빙은 넣지 않는다</td></tr>
-      <tr><td class="k">품질 관리</td><td>정책을 늘릴 때마다 가상 신청자 테스트를 추가하고, 공식 기준 정답과 비교한 정확도를 숫자로 관리한다 (현재 청년월세 15명 중 정답 11명, 오판 0명)</td></tr>
+      <tr><td class="k">품질 관리</td><td>정책을 늘릴 때마다 가상 신청자 테스트를 추가하고, 공식 기준 정답과 비교한 정확도를 숫자로 관리한다 (현재 청년월세 15명 중 정답 13명, 오판 0명)</td></tr>
       <tr><td class="k">맞춤 추천 고도화</td><td>지금의 조건 기반 추천을 "받을 가능성이 높은 순"(서버 판정·한 끗 차이 반영)으로, 다음에는 열어 본 공고·스크랩을 브라우저 안에서 학습하는 추천으로 바꾼다</td></tr>
       <tr><td class="k">기관 제휴·공식 연계</td><td>대구 청년 주거지원 같은 사업 1개를 시범으로 청년센터·지자체와 검수 항목을 검증하고, 승인된 사업부터 본인인증 → 접수 → 보완 요청·결과 수신을 잇는다</td></tr>
       <tr><td class="k">읽는 서류 확장</td><td>같은 엔진으로 전월세 계약 서류(등기부등본·계약서)와 첫 직장 서류(근로계약서·급여명세서)까지 넓혀, 서명·제출 전에 청년의 손해를 막는다</td></tr>
